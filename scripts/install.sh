@@ -66,6 +66,15 @@ ok "plugin symlinked: $PLUGIN_DIR -> $REPO_DIR/plugin/claude_cli"
 echo "-> Verifying"
 if command -v hermes >/dev/null 2>&1; then
     ok "hermes CLI found on PATH"
+    # Recent Hermes versions install "portable" plugin packages (ones with a
+    # plugin.yaml, like this one) disabled by default as a security gate — this
+    # step is silently a no-op on older versions that don't have that gate.
+    if hermes plugins enable claude-cli-provider < /dev/null >/tmp/hermes-claude-cli-enable.log 2>&1; then
+        ok "plugin enabled in Hermes (see 'hermes plugins list')"
+    else
+        warn "'hermes plugins enable claude-cli-provider' did not confirm success — run it yourself and check 'hermes plugins list'"
+    fi
+    rm -f /tmp/hermes-claude-cli-enable.log
 else
     warn "hermes CLI not found on PATH — the plugin is symlinked; verify from inside your Hermes Python environment instead, e.g.:"
     echo "      python -m hermes_cli.main -z \"hello\" --provider claude-cli -m sonnet"

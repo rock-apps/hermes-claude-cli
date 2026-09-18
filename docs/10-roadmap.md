@@ -15,7 +15,13 @@ Failed to load user provider plugin claude-cli: ProviderProfile.__init__() got a
 
 **Isso não é um bug do plugin** — é um requisito mínimo de versão que não existia quando o projeto começou (o mecanismo genérico é relativamente novo no histórico do Hermes Agent). Diagnóstico rápido em qualquer checkout do Hermes: `grep process_command providers/base.py` (presente = compatível).
 
-**Correção**: `hermes update` (comando oficial, testado e disponível — `hermes --help` lista `update: Update Hermes Agent to the latest version`). **Não executado automaticamente** — é uma atualização grande (dezenas de milhares de commits) num ambiente pessoal já em uso ativo (sessões, cron jobs, integrações WhatsApp/Slack configuradas), decisão que cabe ao usuário, não a uma sessão automatizada.
+**Correção**: `hermes update` (comando oficial). **Executado com autorização explícita do usuário** em 2026-09-18, no `~/.hermes` real dele. Resultado:
+
+- Código atualizado com sucesso (`37254` novos commits puxados, HEAD agora em `aee7de4db5`).
+- **Aviso real, não relacionado a este plugin, que o usuário precisa resolver**: havia uma alteração local não commitada em `hermes_cli/web_server.py` no checkout do usuário antes do update. O `hermes update` faz auto-stash antes de puxar e tenta reaplicar depois — a reaplicação teve conflito e foi abortada; a mudança local ficou **preservada, mas não aplicada** em `git stash@{0}` ("hermes-update-autostash-20260918-175356"), com um arquivo `hermes_cli/web_server.py.orig` deixado para trás do merge abortado. Não mexemos nisso — é uma customização própria do usuário no core do Hermes, não algo deste projeto. Para revisar: `cd ~/.hermes/hermes-agent && git stash show -p stash@{0}`.
+- **Aviso real, ambiental, não relacionado a este plugin**: a atualização de dependências Node.js falhou (`npm error notsup` — a versão do `npm` instalada, 11.12.1, não satisfaz o range exigido pelo hermes-agent, `<11.10.0 || >=11.17.0`). Isso afeta só o dashboard/web UI/TUI do Hermes — não afeta o `hermes` CLI de chat nem o provider `claude-cli` (confirmado, ver abaixo).
+- **Descoberta nova, não documentada antes**: nesta versão atualizada, plugins "portáveis" (com `plugin.yaml`, como o nosso) **instalam desabilitados por padrão** — um gate de segurança do próprio Hermes que não existia na versão que a validação E2E da Fase 1 usou horas antes (mais um sintoma de quão rápido esse repositório muda). Precisa de `hermes plugins enable claude-cli-provider` explicitamente. **`scripts/install.sh` atualizado** para rodar isso automaticamente (silenciosamente vira no-op em versões mais antigas sem esse gate).
+- **Confirmado funcionando de ponta a ponta no Hermes real do usuário, pós-update, pós-enable**: `hermes -z "..." --provider claude-cli -m sonnet` respondeu corretamente.
 
 ### Validação E2E real (não só testes unitários isolados)
 
