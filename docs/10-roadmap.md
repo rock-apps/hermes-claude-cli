@@ -75,10 +75,26 @@ Trabalho real desta fase, se for adotado no futuro: usar `--output-format stream
 - ~~`--restricted` como possível default~~ — **feito**: `CLAUDE_CLI_RESTRICTED` agora default `true` (era `false`). Confirmado empiricamente que não quebra chat comum e que bloqueia uma tentativa explícita de usar Bash. 1 novo teste (`test_load_config_allows_disabling_restricted_mode`), suíte agora com 68 testes.
 - **Ainda não feito**: `--max-budget-usd` sem default definido (hoje sem teto) — não é um bug, é um ajuste de postura ainda não decidido, não bloqueia nada.
 
-## Fase 4 — Sessão contínua (v2, otimização)
+## Fase 4 — Sessão contínua — ✅ implementada (2026-09-18)
 
-- Mapear sessão do Hermes ⇄ `--session-id`/`--resume` do `claude` CLI, evitando reenviar o histórico completo a cada turno.
-- Testar cenários de expiração/compactação de sessão e concorrência (chamadas simultâneas na mesma sessão).
+**Pergunta central investigada antes de implementar**: o Hermes constrói um `ClaudeCLIClient` novo a cada turno, ou reaproveita a mesma instância ao longo de uma conversa? Isso decide se dá pra guardar estado em `self`. Investigado no código-fonte real do Hermes Agent (clone fresco da `main`, não suposição): `agent/agent_runtime_helpers.py` mantém um cache de client "primário" (`_ensure_primary_openai_client`, `shared=True`, criado uma vez em `agent_init`) e um cache de client "por request" (`_create_request_openai_client` → `_checkout_request_slot`, `shared=False`) que **reaproveita a mesma instância entre chamadas sequenciais enquanto os kwargs de construção não mudarem**, e só cria uma instância nova quando o slot está `in_use` (chamada concorrente) — nesse caso a nova instância nasce sem nenhum estado, o que já é o fallback seguro que a gente quer. Conclusão: estado em `self` é seguro.
+
+**Implementado**:
+- `plugin/claude_cli/session.py` — `compute_delta(previous_messages, current_messages)`, lógica pura: retorna as mensagens novas desde a última chamada, ou `None` se não for seguro assumir continuidade (histórico mais curto, reescrito/compactado pelo Hermes, etc.).
+- `ClaudeCLIClient` agora guarda `_last_messages`/`_last_session_id`/`_last_model` por instância, protegidos por um `threading.Lock` (defesa extra caso alguma versão futura do Hermes compartilhe uma instância entre chamadas concorrentes de verdade — o Hermes atual, pelo que foi investigado, já evita isso do lado dele).
+- `process.build_args()` ganhou `resume_session_id`: quando setado, adiciona `--resume <id>` e **não** reenvia o system prompt (o CLI já snapshota e reaplica o system prompt automaticamente em resumes — `--system-prompt-snapshot`, default `on`).
+- Se o `--resume` falhar (sessão expirada/desconhecida), cai automaticamente para uma chamada nova com o histórico completo, e limpa o estado rastreado. Mesma coisa se o resultado vier com `is_error=true`.
+- Config nova: `CLAUDE_CLI_SESSION_CONTINUITY` (default `true`, ver [07-configuracao.md](./07-configuracao.md)).
+
+**Achados empíricos que moldaram a implementação** (testados direto contra o `claude` CLI real, não assumidos):
+- `--resume <id-válido>` combinado com um prompt contendo só a mensagem nova funciona corretamente — o CLI usa o contexto da sessão anterior sem precisar que ela seja reenviada. Confirmado com um teste de fato (turno 1: "meu número favorito é 9"; turno 2, via `--resume` só com a pergunta nova: "qual é meu número favorito mais 1?" → resposta "10").
+- `--resume <id-nunca-visto>` **não** devolve um JSON com `is_error: true` como os erros de API (ex.: modelo inválido) — devolve **stdout vazio** e a mensagem de erro em **stderr** ("No conversation found with session ID: ..."), com exit code 1. Isso significa que `run_once()` **levanta `ClaudeCLIProcessError`** nesse caso (não retorna um `CLIResult`) — é exatamente esse tipo de exceção que o fallback em `client.py` precisa capturar, não checar `result.is_error`.
+
+**Prova E2E real** (duas chamadas sequenciais via `ClaudeCLIClient` de verdade, sem mock): turno 1 sem `--resume`; turno 2 com `--resume <session_id real capturado do turno 1>` e o prompt final enviado contendo só o delta (resposta do assistente + pergunta nova), **sem** o texto original do turno 1 — e resposta final correta ("10"). Ver a suíte `TestSessionContinuity` em `tests/test_client.py` e `tests/test_session.py` para a cobertura unitária (14 novos testes, suíte total com 81 testes, `ruff check` limpo).
+
+**Não implementado / decisões conscientes de escopo**:
+- Nenhuma persistência entre processos: o rastreamento é só por instância de `ClaudeCLIClient`, então não sobrevive a um restart do processo do Hermes nem a invocações separadas de `hermes -z ...` (cada uma é um processo novo). Isso é aceitável — o ganho já vale para conversas longas dentro de um processo Hermes de vida longa (chat interativo, dashboard, bots), que é o caso comum.
+- Concorrência real (duas chamadas de verdade simultâneas na mesma instância) não foi testada com um cenário de corrida de fato — o `threading.Lock` protege a leitura+escrita do estado, mas o comportamento "correto" nesse caso (não documentado pelo CLI) não foi validado empiricamente; na prática, dado como o Hermes gerencia seus próprios slots (`in_use`), esse cenário não deveria ocorrer pelo caminho normal.
 
 ## Fase 5 — Empacotamento e distribuição — ✅ parcialmente implementada (2026-09-18)
 

@@ -11,6 +11,7 @@ Superfície de variáveis de ambiente do plugin, implementada em `plugin/claude_
 | `CLAUDE_CLI_RESTRICTED` | `true` | Se `true` (default), adiciona `--restricted` (remove Bash/PowerShell/REPL/WebFetch). Decisão tomada na Fase 3: o caso de uso é "responder uma mensagem de chat", não "agir como agente com acesso ao sistema" — ver [08-seguranca.md](./08-seguranca.md). Setar `false` explicitamente para um deployment que quer o `claude-cli` como agente completo. |
 | `CLAUDE_CLI_MAX_BUDGET_USD` | (vazio = sem limite) | Mapeia para `--max-budget-usd`, teto de gasto por chamada. |
 | `CLAUDE_CLI_TIMEOUT_SECONDS` | `300` (paridade com os 5 min do bridge original) | Timeout do subprocesso por chamada. |
+| `CLAUDE_CLI_SESSION_CONTINUITY` | `true` | Se `true` (default), reaproveita a sessão do `claude` CLI entre turnos via `--resume` em vez de reenviar o histórico completo sempre — ver Fase 4 em [10-roadmap.md](./10-roadmap.md). Qualquer falha do resume cai automaticamente para uma chamada nova com histórico completo. Setar `false` para desativar totalmente. |
 
 Não existe `CLAUDE_CLI_STREAM_MODE` (estava no plano original, nunca implementado): streaming não usa um modo dedicado — ver a nota sobre `stream=True` em [05-arquitetura-unificada.md](./05-arquitetura-unificada.md) e a Fase 2 em [10-roadmap.md](./10-roadmap.md).
 

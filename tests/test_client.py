@@ -336,3 +336,192 @@ def test_create_chat_completion_forwards_a_filtered_subprocess_env(monkeypatch) 
     # Assert
     assert seen_envs[0] is not None
     assert "ANTHROPIC_API_KEY" not in seen_envs[0]
+
+
+class TestSessionContinuity:
+    """`run_once` is monkeypatched here to record every call's args (to check
+    whether --resume was used) and to simulate the real claude CLI's own
+    session_id-per-call behavior, without a real subprocess."""
+
+    def test_second_turn_with_extended_history_resumes_with_only_the_delta(
+        self, monkeypatch
+    ) -> None:
+        # Arrange
+        calls: list[list[str]] = []
+
+        def fake_run_once(binary, args, **kwargs):
+            calls.append(args)
+            return _success_result(session_id="claude-session-abc")
+
+        monkeypatch.setattr("plugin.claude_cli.client.run_once", fake_run_once)
+        client = ClaudeCLIClient(config=_make_config())
+        turn1 = [{"role": "user", "content": "my favorite number is 9"}]
+
+        # Act
+        client.chat.completions.create(model="sonnet", messages=turn1)
+        turn2 = turn1 + [
+            {"role": "assistant", "content": "4"},
+            {"role": "user", "content": "what is it plus 1?"},
+        ]
+        client.chat.completions.create(model="sonnet", messages=turn2)
+
+        # Assert
+        assert len(calls) == 2
+        first_call, second_call = calls
+        assert "--resume" not in first_call
+        assert "--resume" in second_call
+        assert second_call[second_call.index("--resume") + 1] == "claude-session-abc"
+        # Only the delta (assistant + new user message) is sent, not the full
+        # turn1+turn2 history.
+        sent_prompt = second_call[-1]
+        assert "what is it plus 1?" in sent_prompt
+        assert "my favorite number is 9" not in sent_prompt
+
+    def test_first_call_never_attempts_to_resume(self, monkeypatch) -> None:
+        # Arrange
+        calls: list[list[str]] = []
+
+        def fake_run_once(binary, args, **kwargs):
+            calls.append(args)
+            return _success_result()
+
+        monkeypatch.setattr("plugin.claude_cli.client.run_once", fake_run_once)
+        client = ClaudeCLIClient(config=_make_config())
+
+        # Act
+        client.chat.completions.create(
+            model="sonnet", messages=[{"role": "user", "content": "hi"}]
+        )
+
+        # Assert
+        assert "--resume" not in calls[0]
+
+    def test_rewritten_history_falls_back_to_a_fresh_full_call(self, monkeypatch) -> None:
+        # Arrange: simulates Hermes' own context compression rewriting the
+        # transcript between turns.
+        calls: list[list[str]] = []
+
+        def fake_run_once(binary, args, **kwargs):
+            calls.append(args)
+            return _success_result(session_id="claude-session-abc")
+
+        monkeypatch.setattr("plugin.claude_cli.client.run_once", fake_run_once)
+        client = ClaudeCLIClient(config=_make_config())
+        client.chat.completions.create(
+            model="sonnet", messages=[{"role": "user", "content": "original"}]
+        )
+
+        # Act
+        client.chat.completions.create(
+            model="sonnet",
+            messages=[{"role": "user", "content": "compacted summary instead"}],
+        )
+
+        # Assert
+        assert len(calls) == 2
+        assert "--resume" not in calls[1]
+
+    def test_model_switch_between_turns_does_not_resume(self, monkeypatch) -> None:
+        # Arrange
+        calls: list[list[str]] = []
+
+        def fake_run_once(binary, args, **kwargs):
+            calls.append(args)
+            return _success_result(session_id="claude-session-abc")
+
+        monkeypatch.setattr("plugin.claude_cli.client.run_once", fake_run_once)
+        client = ClaudeCLIClient(config=_make_config())
+        turn1 = [{"role": "user", "content": "hi"}]
+        client.chat.completions.create(model="sonnet", messages=turn1)
+
+        # Act: same extended history, but a different model this time
+        turn2 = turn1 + [{"role": "user", "content": "follow-up"}]
+        client.chat.completions.create(model="opus", messages=turn2)
+
+        # Assert
+        assert "--resume" not in calls[1]
+
+    def test_resume_failure_falls_back_to_fresh_call_and_clears_tracking(
+        self, monkeypatch
+    ) -> None:
+        # Arrange: simulates the real claude CLI behavior for an unresumable
+        # session (empty/unparseable stdout -> run_once raises), verified
+        # empirically against a real `--resume <unknown-id>` invocation.
+        from plugin.claude_cli.process import ClaudeCLIProcessError
+
+        calls: list[list[str]] = []
+
+        def fake_run_once(binary, args, **kwargs):
+            calls.append(args)
+            if "--resume" in args:
+                raise ClaudeCLIProcessError("No conversation found with session ID: x")
+            return _success_result(session_id="new-session-after-fallback")
+
+        monkeypatch.setattr("plugin.claude_cli.client.run_once", fake_run_once)
+        client = ClaudeCLIClient(config=_make_config())
+        turn1 = [{"role": "user", "content": "hi"}]
+        client.chat.completions.create(model="sonnet", messages=turn1)
+
+        # Act
+        turn2 = turn1 + [{"role": "user", "content": "follow-up"}]
+        completion = client.chat.completions.create(model="sonnet", messages=turn2)
+
+        # Assert: two calls happened for turn 2 (the failed resume attempt, then a
+        # fresh fallback call carrying the FULL turn2 history), and the completion
+        # still succeeded.
+        assert len(calls) == 3
+        failed_resume_call, fresh_fallback_call = calls[1], calls[2]
+        assert "--resume" in failed_resume_call
+        assert "--resume" not in fresh_fallback_call
+        assert "hi" in fresh_fallback_call[-1]
+        assert "follow-up" in fresh_fallback_call[-1]
+        assert completion.is_error is False
+
+    def test_session_continuity_disabled_never_resumes(self, monkeypatch) -> None:
+        # Arrange
+        calls: list[list[str]] = []
+
+        def fake_run_once(binary, args, **kwargs):
+            calls.append(args)
+            return _success_result(session_id="claude-session-abc")
+
+        monkeypatch.setattr("plugin.claude_cli.client.run_once", fake_run_once)
+        client = ClaudeCLIClient(config=_make_config(session_continuity=False))
+        turn1 = [{"role": "user", "content": "hi"}]
+        client.chat.completions.create(model="sonnet", messages=turn1)
+
+        # Act
+        turn2 = turn1 + [{"role": "user", "content": "follow-up"}]
+        client.chat.completions.create(model="sonnet", messages=turn2)
+
+        # Assert
+        assert all("--resume" not in call for call in calls)
+
+    def test_error_result_clears_tracking_so_next_call_is_fresh(self, monkeypatch) -> None:
+        # Arrange
+        calls: list[list[str]] = []
+        responses = iter(
+            [
+                _success_result(session_id="claude-session-abc"),
+                _success_result(is_error=True, error_message="boom", text="boom"),
+                _success_result(session_id="claude-session-xyz"),
+            ]
+        )
+
+        def fake_run_once(binary, args, **kwargs):
+            calls.append(args)
+            return next(responses)
+
+        monkeypatch.setattr("plugin.claude_cli.client.run_once", fake_run_once)
+        client = ClaudeCLIClient(config=_make_config())
+        turn1 = [{"role": "user", "content": "hi"}]
+        client.chat.completions.create(model="sonnet", messages=turn1)
+        turn2 = turn1 + [{"role": "user", "content": "trigger an error"}]
+        client.chat.completions.create(model="sonnet", messages=turn2)
+
+        # Act: a third turn — tracking should have been cleared by the error above.
+        turn3 = turn2 + [{"role": "user", "content": "after the error"}]
+        client.chat.completions.create(model="sonnet", messages=turn3)
+
+        # Assert
+        assert "--resume" not in calls[2]

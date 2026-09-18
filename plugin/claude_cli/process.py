@@ -86,11 +86,23 @@ def build_args(
     prompt: str,
     permissions: PermissionConfig,
     max_budget_usd: float | None = None,
+    resume_session_id: str | None = None,
 ) -> list[str]:
     """Build the argv tail for a `claude` invocation (everything after the binary
     path itself — the caller supplies the binary path separately to `run_once`).
+
+    `resume_session_id`, when set, adds `--resume <id>` so `claude` continues a
+    prior session instead of starting fresh — the caller is expected to pass only
+    the NEW messages since that session's last turn as `prompt` in that case (the
+    CLI already has the rest). `system_prompt` is typically empty on a resume call:
+    by default the CLI snapshots the system prompt on a session's first request and
+    replays that snapshot on every later request and resume, so re-sending it is
+    redundant (see `claude --help`, `--system-prompt-snapshot`).
     """
     args = ["-p", "--print", "--model", model, "--output-format", "json"]
+
+    if resume_session_id:
+        args += ["--resume", resume_session_id]
 
     if system_prompt:
         args += ["--append-system-prompt", system_prompt]

@@ -19,6 +19,14 @@ Hermes chat turn is a real risk with no upside for that use case. Verified this
 doesn't break normal chat behaviour (plain Q&A works identically restricted or not).
 Set to false explicitly for a deployment that actually wants claude-cli to act as a
 full agent with system access.
+
+``CLAUDE_CLI_SESSION_CONTINUITY`` defaults to true: resume a prior `claude` session
+via `--resume` instead of re-flattening the whole conversation on every turn, when
+client.py's tracking shows it's safe to (see session.py and docs/10-roadmap.md, Fase
+4). Every failure mode falls back to a normal, full-history call automatically —
+verified empirically, including the case of a `--resume` target the CLI no longer
+recognises. Kept configurable in case a deployment wants to rule the behavior out
+entirely rather than rely on the fallback.
 """
 
 from __future__ import annotations
@@ -48,6 +56,7 @@ class ClaudeCLIConfig:
     restricted: bool = True
     max_budget_usd: float | None = None
     timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS
+    session_continuity: bool = True
 
 
 class ClaudeBinaryNotFoundError(RuntimeError):
@@ -117,5 +126,8 @@ def load_config(env: Mapping[str, str] | None = None) -> ClaudeCLIConfig:
         max_budget_usd=float(max_budget_raw) if max_budget_raw else None,
         timeout_seconds=float(
             resolved_env.get("CLAUDE_CLI_TIMEOUT_SECONDS", "") or _DEFAULT_TIMEOUT_SECONDS
+        ),
+        session_continuity=_parse_bool(
+            resolved_env.get("CLAUDE_CLI_SESSION_CONTINUITY", ""), default=True
         ),
     )

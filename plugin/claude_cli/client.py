@@ -15,6 +15,7 @@ it always uses its own built-in tools transparently.
 
 from __future__ import annotations
 
+import threading
 import time
 import uuid
 from types import SimpleNamespace
@@ -22,13 +23,20 @@ from typing import Any
 
 from .config import ClaudeCLIConfig, load_config
 from .process import (
+    ClaudeCLIProcessError,
     CLIResult,
     PermissionConfig,
     build_args,
     build_subprocess_env,
     run_once,
 )
-from .protocol import flatten_messages, map_stop_reason, normalize_model_alias
+from .protocol import (
+    EmptyMessagesError,
+    flatten_messages,
+    map_stop_reason,
+    normalize_model_alias,
+)
+from .session import compute_delta
 
 
 def _effective_timeout(timeout: Any, default: float) -> float:
@@ -106,6 +114,19 @@ class ClaudeCLIClient:
         self.chat = SimpleNamespace(
             completions=SimpleNamespace(create=self._create_chat_completion)
         )
+        # Session-continuity tracking (Fase 4, docs/10-roadmap.md). Scoped to this
+        # instance deliberately: Hermes reuses one ClaudeCLIClient across the turns
+        # of a conversation (as long as its construction kwargs don't change), so
+        # instance state is a safe place for this. A lock guards it because Hermes
+        # *can* hand out a fresh instance for a genuinely concurrent call on the
+        # same conversation (its own per-request client slot has an `in_use` guard
+        # that does exactly this) — but if some caller ever does share one instance
+        # across concurrent turns, this keeps the read-decide-write sequence atomic
+        # instead of racing two turns onto the same tracked session id.
+        self._session_lock = threading.Lock()
+        self._last_messages: list[dict[str, Any]] | None = None
+        self._last_session_id: str | None = None
+        self._last_model: str | None = None
 
     def close(self) -> None:
         """No-op: each call is a self-contained subprocess with nothing kept open
@@ -113,6 +134,75 @@ class ClaudeCLIClient:
         unconditionally on every provider client (verified against a real Hermes
         Agent process — without this, cleanup logs a harmless but noisy
         AttributeError at debug level)."""
+
+    def _run_turn(
+        self, *, resolved_model: str, messages: list[dict[str, Any]], timeout: float
+    ) -> CLIResult:
+        config = self._config
+        resume_id: str | None = None
+        delta_prompt: str | None = None
+
+        if config.session_continuity:
+            with self._session_lock:
+                if resolved_model == self._last_model:
+                    delta = compute_delta(self._last_messages, messages)
+                    if delta is not None:
+                        try:
+                            _, delta_prompt = flatten_messages(delta)
+                        except EmptyMessagesError:
+                            delta_prompt = None
+                        if delta_prompt:
+                            resume_id = self._last_session_id
+
+        result: CLIResult | None = None
+        if resume_id and delta_prompt:
+            resume_args = build_args(
+                model=resolved_model,
+                system_prompt="",
+                prompt=delta_prompt,
+                permissions=_permissions_for(config),
+                max_budget_usd=config.max_budget_usd,
+                resume_session_id=resume_id,
+            )
+            try:
+                result = run_once(
+                    config.binary, resume_args, env=build_subprocess_env(), timeout=timeout
+                )
+            except ClaudeCLIProcessError:
+                # The session claude knows about is gone (expired, compacted, or
+                # otherwise unresumable) — verified empirically that an unknown
+                # --resume target fails with empty/unparseable stdout and a plain
+                # stderr message, not a normal is_error=true JSON result, so
+                # run_once raises rather than returning a CLIResult here. Drop the
+                # stale tracking and fall through to a full, fresh call below.
+                with self._session_lock:
+                    self._last_session_id = None
+                    self._last_messages = None
+
+        if result is None:
+            system_prompt, prompt = flatten_messages(messages)
+            fresh_args = build_args(
+                model=resolved_model,
+                system_prompt=system_prompt,
+                prompt=prompt,
+                permissions=_permissions_for(config),
+                max_budget_usd=config.max_budget_usd,
+            )
+            result = run_once(
+                config.binary, fresh_args, env=build_subprocess_env(), timeout=timeout
+            )
+
+        if config.session_continuity:
+            with self._session_lock:
+                if result.is_error:
+                    self._last_session_id = None
+                    self._last_messages = None
+                else:
+                    self._last_session_id = result.session_id or None
+                    self._last_messages = list(messages)
+                    self._last_model = resolved_model
+
+        return result
 
     def _create_chat_completion(
         self,
@@ -127,18 +217,9 @@ class ClaudeCLIClient:
     ) -> Any:
         config = self._config
         resolved_model = normalize_model_alias(model or "", config.default_model)
-        system_prompt, prompt = flatten_messages(messages or [])
-        args = build_args(
-            model=resolved_model,
-            system_prompt=system_prompt,
-            prompt=prompt,
-            permissions=_permissions_for(config),
-            max_budget_usd=config.max_budget_usd,
-        )
-        result = run_once(
-            config.binary,
-            args,
-            env=build_subprocess_env(),
+        result = self._run_turn(
+            resolved_model=resolved_model,
+            messages=messages or [],
             timeout=_effective_timeout(timeout, config.timeout_seconds),
         )
         completion = _build_completion(resolved_model, result)
