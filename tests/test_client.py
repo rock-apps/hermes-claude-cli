@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 from plugin.claude_cli.client import ClaudeCLIClient, _effective_timeout
 from plugin.claude_cli.config import ClaudeCLIConfig
-from plugin.claude_cli.process import CLIResult
+from plugin.claude_cli.process import CLIResult, StreamChunk
 
 
 def _make_config(**overrides) -> ClaudeCLIConfig:
@@ -152,44 +152,30 @@ def test_create_chat_completion_non_streaming_returns_completion_directly(
     assert completion.object == "chat.completion"
 
 
-def _install_fake_acp_openai_bridge(monkeypatch) -> list[SimpleNamespace]:
-    """Install a fake `agent.acp_openai_bridge` module in sys.modules so
-    client.py's lazy `from agent.acp_openai_bridge import completion_to_stream_chunks`
-    resolves without a real Hermes checkout on the test path. Records every
-    completion it was called with in the returned list."""
-    import sys
-    import types
+def _stream_chunks(*chunks: StreamChunk):
+    """A fake `run_streaming` (matches its `(binary, args, *, env, timeout)`
+    signature) that just replays a canned sequence of StreamChunks."""
 
-    calls: list[SimpleNamespace] = []
+    def fake_run_streaming(binary, args, **kwargs):
+        yield from chunks
 
-    def fake_completion_to_stream_chunks(completion: SimpleNamespace) -> list[SimpleNamespace]:
-        calls.append(completion)
-        delta = SimpleNamespace(role="assistant", content=completion.choices[0].message.content)
-        data_chunk = SimpleNamespace(
-            choices=[SimpleNamespace(index=0, delta=delta, finish_reason=completion.choices[0].finish_reason)],
-            model=completion.model,
-            usage=None,
-        )
-        usage_chunk = SimpleNamespace(choices=[], model=completion.model, usage=completion.usage)
-        return [data_chunk, usage_chunk]
-
-    fake_agent_pkg = types.ModuleType("agent")
-    fake_bridge_module = types.ModuleType("agent.acp_openai_bridge")
-    fake_bridge_module.completion_to_stream_chunks = fake_completion_to_stream_chunks
-    monkeypatch.setitem(sys.modules, "agent", fake_agent_pkg)
-    monkeypatch.setitem(sys.modules, "agent.acp_openai_bridge", fake_bridge_module)
-    return calls
+    return fake_run_streaming
 
 
-def test_create_chat_completion_streaming_converts_via_hermes_bridge_helper(
+def test_create_chat_completion_streaming_yields_incremental_text_deltas(
     monkeypatch,
 ) -> None:
-    # Arrange: verified against a real Hermes Agent process that a stream consumer
-    # needs `.choices[i].delta`, not `.choices[i].message` — see client.py.
+    # Arrange: real token-by-token delivery (Fase 2) — verified against a real
+    # `claude` invocation that stream-json emits one content_block_delta per
+    # chunk of text, not the whole answer at once.
     monkeypatch.setattr(
-        "plugin.claude_cli.client.run_once", lambda *a, **k: _success_result()
+        "plugin.claude_cli.client.run_streaming",
+        _stream_chunks(
+            StreamChunk(text_delta="Hel"),
+            StreamChunk(text_delta="lo"),
+            StreamChunk(is_final=True, result=_success_result(text="Hello")),
+        ),
     )
-    calls = _install_fake_acp_openai_bridge(monkeypatch)
     client = ClaudeCLIClient(config=_make_config())
 
     # Act
@@ -200,10 +186,109 @@ def test_create_chat_completion_streaming_converts_via_hermes_bridge_helper(
     )
 
     # Assert
-    assert len(calls) == 1
-    assert calls[0].choices[0].message.content == "4"
-    assert chunks[0].choices[0].delta.content == "4"
-    assert chunks[1].usage is not None
+    assert [c.choices[0].delta.content for c in chunks[:2]] == ["Hel", "lo"]
+    assert chunks[2].choices[0].finish_reason == "stop"
+    assert chunks[2].usage.total_tokens == 15
+
+
+def test_create_chat_completion_streaming_yields_reasoning_deltas(monkeypatch) -> None:
+    # Arrange: extended-thinking models emit thinking_delta events distinct from
+    # text_delta — surfaced as reasoning_content, not content, on the chunk delta.
+    monkeypatch.setattr(
+        "plugin.claude_cli.client.run_streaming",
+        _stream_chunks(
+            StreamChunk(reasoning_delta="Let me think..."),
+            StreamChunk(text_delta="42"),
+            StreamChunk(is_final=True, result=_success_result(text="42")),
+        ),
+    )
+    client = ClaudeCLIClient(config=_make_config())
+
+    # Act
+    chunks = list(
+        client.chat.completions.create(
+            model="sonnet", messages=[{"role": "user", "content": "hi"}], stream=True
+        )
+    )
+
+    # Assert
+    assert chunks[0].choices[0].delta.reasoning_content == "Let me think..."
+    assert not hasattr(chunks[0].choices[0].delta, "content")
+    assert chunks[1].choices[0].delta.content == "42"
+
+
+def test_create_chat_completion_streaming_surfaces_error_text_on_final_chunk(
+    monkeypatch,
+) -> None:
+    # Arrange
+    error_result = _success_result(
+        text="model not found", is_error=True, stop_reason="stop_sequence"
+    )
+    monkeypatch.setattr(
+        "plugin.claude_cli.client.run_streaming",
+        _stream_chunks(StreamChunk(is_final=True, result=error_result)),
+    )
+    client = ClaudeCLIClient(config=_make_config())
+
+    # Act
+    (chunk,) = list(
+        client.chat.completions.create(
+            model="sonnet", messages=[{"role": "user", "content": "hi"}], stream=True
+        )
+    )
+
+    # Assert
+    assert chunk.choices[0].delta.content == "model not found"
+    assert chunk.choices[0].finish_reason == "stop"
+
+
+def test_create_chat_completion_streaming_resume_falls_back_to_fresh_on_error_result(
+    monkeypatch,
+) -> None:
+    # Arrange: verified empirically that an unknown --resume target in streaming
+    # mode comes back as a normal terminal chunk with is_error=True (NOT an
+    # exception, unlike run_once) — the client must retry fresh transparently
+    # since nothing was yielded yet, same as the non-streaming fallback.
+    client = ClaudeCLIClient(config=_make_config())
+    client._last_model = "sonnet"
+    client._last_messages = [{"role": "user", "content": "turn 1"}]
+    client._last_session_id = "stale-session-id"
+
+    call_count = 0
+
+    def fake_run_streaming(binary, args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            assert "--resume" in args
+            yield StreamChunk(
+                is_final=True,
+                result=_success_result(text="", is_error=True, session_id="stale-session-id"),
+            )
+        else:
+            assert "--resume" not in args
+            yield StreamChunk(text_delta="fresh answer")
+            yield StreamChunk(is_final=True, result=_success_result(text="fresh answer"))
+
+    monkeypatch.setattr("plugin.claude_cli.client.run_streaming", fake_run_streaming)
+
+    # Act
+    chunks = list(
+        client.chat.completions.create(
+            model="sonnet",
+            messages=[
+                {"role": "user", "content": "turn 1"},
+                {"role": "assistant", "content": "..."},
+                {"role": "user", "content": "turn 2"},
+            ],
+            stream=True,
+        )
+    )
+
+    # Assert
+    assert call_count == 2
+    assert chunks[0].choices[0].delta.content == "fresh answer"
+    assert client._last_session_id == "abc-123"  # from the fresh call's CLIResult
 
 
 def test_create_chat_completion_ignores_tools_without_error(monkeypatch) -> None:

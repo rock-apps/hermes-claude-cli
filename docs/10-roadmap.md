@@ -2,7 +2,9 @@
 
 ## Status
 
-Implemented and validated end-to-end: Fases 1, 3, 4, and 5 are done. Fase 2 was deliberately skipped (see below). 81 tests passing, `ruff` clean.
+Implemented and validated end-to-end: Fases 1 through 5 are all done. 94 tests passing, `ruff` clean.
+
+Fase 2 (real streaming) was initially skipped, then built after all — see below for why the original "not worth it" call got revisited.
 
 ## Minimum Hermes Agent version
 
@@ -32,7 +34,7 @@ That proves Hermes' real provider-discovery mechanism finds this plugin and rout
 Two real bugs only surfaced this way (Hermes calls the client differently than assumed):
 
 1. **Timeout type**: Hermes passes `timeout` as an `httpx.Timeout`-like object (`.read`/`.write`/`.connect`/`.pool`), not a bare `float` — broke `subprocess.run(timeout=...)`. Fixed with `_effective_timeout()` in `client.py` (same fix shape as the reference `copilot_acp_client.py`).
-2. **Streaming shape**: Hermes' internal relay always calls in streaming mode and expects chunks with `.choices[i].delta`, not a full `.choices[i].message`. Fixed by reusing the same helper the reference `copilot-acp` client uses: `agent.acp_openai_bridge.completion_to_stream_chunks(completion)`.
+2. **Streaming shape**: Hermes' internal relay always calls in streaming mode and expects chunks with `.choices[i].delta`, not a full `.choices[i].message`. Originally fixed by reusing the reference `copilot-acp` client's `agent.acp_openai_bridge.completion_to_stream_chunks(completion)` helper (one fake chunk from a finished completion); superseded once Fase 2 built real incremental chunks directly — see below.
 
 A no-op `close()` was also added (Hermes calls it unconditionally during provider-client cleanup).
 
@@ -42,7 +44,13 @@ A no-op `close()` was also added (Hermes calls it unconditionally during provide
 
 **Fase 1 — functional provider parity.** `plugin/claude_cli/{protocol,process,config,client,models,__init__}.py`. Real `--output-format json` parsing (`total_cost_usd`/`usage`/`session_id`/`is_error`) — fixes the original bridge's bug of those fields always being zero. CLI JSON schema verified empirically against a real installed `claude` CLI (v2.1.276), not assumed.
 
-**Fase 2 — real token streaming: deliberately not built.** Investigating Hermes' own reference client (`agent/copilot_acp_client.py`, used by the bundled `copilot-acp` provider) showed that even Nous Research's official subprocess-based provider doesn't do real incremental streaming — it builds the full response and converts it to chunks via a shared Hermes helper. This plugin does the same (`stream=True` returns a single-chunk `iter([completion])`). Real work for this phase, if ever revisited: `--output-format stream-json --include-partial-messages` (event schema already captured in [06](./06-claude-cli-reference.md)) feeding incremental events into a streaming version of that same conversion helper — would need confirming the helper can accept incremental input rather than only a finished completion.
+**Fase 2 — real token streaming — built after all.** Originally skipped: Hermes' own `copilot_acp_client.py` reference doesn't do real incremental streaming either, so `stream=True` just replayed one finished completion as a single fake chunk. Revisited after real usage on the `muse` deployment surfaced the actual cost of that choice: with no incremental output, Hermes' UI shows "waiting on sonnet — no stream output for Ns" for the entire duration of a `claude` call (which can be long — extended thinking on a hard prompt easily exceeds a minute) with zero feedback, indistinguishable from a hang.
+
+Implemented: `process.run_streaming()` runs `claude` with `--output-format stream-json --include-partial-messages` (verified empirically that `--print` + `stream-json` also requires `--verbose`, undocumented in `claude --help`'s flag description — a real bug caught before it shipped) and yields a `StreamChunk` per `content_block_delta` event — `text_delta` for normal output, `thinking_delta` for extended-thinking models — plus one final chunk carrying the same `CLIResult` shape `run_once` returns, parsed from the terminal `type: "result"` event. `client.py`'s `_stream_openai_chunks()` converts these directly into `.choices[i].delta.content` / `.delta.reasoning_content` chunks — no more detour through Hermes' `completion_to_stream_chunks` helper.
+
+Session continuity (Fase 4) composes with this correctly: `_run_turn_streaming()` shares the same resume/fresh decision as the non-streaming path. One real behavioral difference found while wiring this up: an unknown `--resume` target in streaming mode does **not** raise (unlike `run_once`, which gets empty/unparseable stdout) — it comes back as a normal terminal chunk with `is_error=True`. Handled by retrying fresh transparently whenever nothing has been yielded to the caller yet (same user-visible behavior as the non-streaming fallback); if content was already streamed before the failure, the stream just ends rather than risking duplicated output from an invisible retry.
+
+Real E2E proof (no mocks): incremental text deltas received one at a time via a live `ClaudeCLIClient.chat.completions.create(stream=True)` call, and a full two-turn session-continuity + streaming conversation (turn 1 "my favorite number is 12"; turn 2, streamed, resumed, only the delta sent → "15"). 13 new tests (`TestRunStreaming` in `test_process.py`, 4 new streaming tests in `test_client.py` replacing the now-obsolete `completion_to_stream_chunks` mock test), suite at 94, `ruff` clean.
 
 **Fase 3 — security hardening.**
 - Permission mode and `--restricted` defaults resolved (see [08-security.md](./08-security.md)).

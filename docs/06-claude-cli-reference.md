@@ -18,12 +18,14 @@ Gathered from `claude --help` on the locally installed version (**Claude Code 2.
 | `--restricted` | Drops Bash/PowerShell/REPL/WebFetch. Defaults to on (`CLAUDE_CLI_RESTRICTED=true`) — see [08-security.md](./08-security.md). |
 | `--max-budget-usd <amount>` | Per-call spend cap, exposed as `CLAUDE_CLI_MAX_BUDGET_USD` (unset by default). |
 | `--` (separator) | Always inserted right before the prompt. `--add-dir` is variadic, so without this a prompt not starting with `-` gets silently swallowed as one more directory instead of reaching `claude` — a real bug found and fixed during Fase 3, see [08-security.md](./08-security.md). |
+| `--output-format stream-json` | Used for `stream=True` calls (`process.run_streaming()`) — real incremental output, one JSON event per line. See Fase 2 in [10-roadmap.md](./10-roadmap.md) for why this was initially skipped, then built after all. |
+| `--include-partial-messages` | Required alongside `stream-json` to actually get `content_block_delta` events, not just coarse message-level events. |
+| `--verbose` | **Required** alongside `--print --output-format stream-json` — verified empirically: without it the CLI refuses with "requires --verbose" (undocumented in the flag's own `--help` description; this was a real bug caught before `run_streaming` shipped, not a design choice). Harmless for a `--print` invocation — it doesn't add interactive/human-facing output. |
 
 ## Investigated, deliberately not used
 
 | Flag | Why not |
 |---|---|
-| `--output-format stream-json` + `--include-partial-messages` | Real incremental streaming. Not used because even Hermes' own reference client (`copilot_acp_client.py`) doesn't do real token-by-token delivery for a subprocess provider — see the streaming note in [05](./05-unified-architecture.md) and Fase 2 in [10-roadmap.md](./10-roadmap.md). |
 | `--input-format stream-json` | Structured stdin input instead of a positional argument — no current need to send messages incrementally. |
 | `--session-id <uuid>` | Setting an explicit session id ourselves. Not needed: `--resume <id>` uses the id `claude` already assigned on the prior turn instead. |
 | `--json-schema <schema>` | Structured output validation — no current use case for it. |

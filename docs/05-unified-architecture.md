@@ -88,8 +88,8 @@ Mirrors `CopilotACPClient`'s minimal surface (see [03](./03-hermes-provider-mode
 - `HERMES_SKIP_TRANSPORT_WRAP = True` — tells Hermes not to re-wrap this client in its generic HTTP transport.
 - `close()` is a no-op (Hermes calls it unconditionally on cleanup; each call here is already self-contained).
 - `_effective_timeout()` normalizes Hermes' `timeout` argument, which can be either a bare float or an `httpx.Timeout`-like object (`.read`/`.write`/`.connect`/`.pool`) — confirmed empirically against a real Hermes process, not assumed.
-- `_run_turn()` is where session continuity (Fase 4, see [10-roadmap.md](./10-roadmap.md)) lives: it asks `session.compute_delta()` whether the current call can safely `--resume` the previous one tracked on `self`, falls back to a full call with the whole flattened history whenever that's not possible or the resume itself fails, and updates the tracked state after every successful call.
-- When `stream=True`, the full completion is built first (there's no real incremental delivery — see the streaming note below), then converted via Hermes' own `agent.acp_openai_bridge.completion_to_stream_chunks()` helper — the same one `copilot-acp` uses, imported lazily (only resolvable inside a real Hermes process).
+- `_run_turn()` (non-streaming) and `_run_turn_streaming()` (streaming) both build on `_decide_call()`, which asks `session.compute_delta()` whether the current call can safely `--resume` the previous one tracked on `self`, and `_record_result()`, which updates that tracked state after every successful call — one shared decision, two execution paths (`run_once` vs `run_streaming`).
+- `stream=True` calls `_run_turn_streaming()` (a generator) and converts its `StreamChunk`s directly into `.choices[i].delta.content` / `.delta.reasoning_content` chunks via `_stream_openai_chunks()` — see the streaming note below.
 
 ### `protocol.py`
 
@@ -97,7 +97,7 @@ Pure translation functions, no I/O: `flatten_messages()` (system prompt + transc
 
 ### `process.py`
 
-`build_args()` builds the CLI argv (always ends with `-- <prompt>`, a deliberate separator — `--add-dir` is variadic and would otherwise swallow a prompt that doesn't start with `-`, see [08-security.md](./08-security.md)). `run_once()` runs `claude` via `subprocess.run(..., check=False)` and always tries `json.loads()` on stdout first, regardless of exit code — the CLI reports its own API-level errors (bad model, etc.) inside a well-formed JSON payload with `is_error: true`, not via a non-JSON crash. `build_subprocess_env()` is the allowlist described in [08-security.md](./08-security.md).
+`build_args()` builds the CLI argv (always ends with `-- <prompt>`, a deliberate separator — `--add-dir` is variadic and would otherwise swallow a prompt that doesn't start with `-`, see [08-security.md](./08-security.md)). `run_once()` runs `claude` via `subprocess.run(..., check=False)` and always tries `json.loads()` on stdout first, regardless of exit code — the CLI reports its own API-level errors (bad model, etc.) inside a well-formed JSON payload with `is_error: true`, not via a non-JSON crash. `run_streaming()` does the streaming equivalent over a `Popen` pipe, one JSON event per line — see the streaming note below. `build_subprocess_env()` is the allowlist described in [08-security.md](./08-security.md).
 
 ### `session.py`
 
@@ -105,7 +105,7 @@ Pure translation functions, no I/O: `flatten_messages()` (system prompt + transc
 
 ## Streaming: what's actually implemented
 
-`stream=True` does not deliver real token-by-token output. Investigating this while implementing revealed that even Hermes' own bundled reference client, `copilot_acp_client.py`, doesn't do incremental streaming for a subprocess-based provider either — it builds the full response first and converts it to stream chunks via the shared `agent.acp_openai_bridge.completion_to_stream_chunks()` helper. This plugin does the same. Real `--output-format stream-json --include-partial-messages` support (the CLI does support it — see [06](./06-claude-cli-reference.md)) is tracked as Fase 2 in [10-roadmap.md](./10-roadmap.md), not implemented, and not clearly worth it given even the reference implementation doesn't bother.
+`stream=True` delivers real incremental text via `process.run_streaming()`, which runs `claude` with `--output-format stream-json --include-partial-messages --verbose` and yields a `StreamChunk` per `content_block_delta` event (`text_delta` → `StreamChunk.text_delta`, `thinking_delta` on extended-thinking models → `StreamChunk.reasoning_delta`), plus one final chunk carrying the same `CLIResult` a non-streaming call would get. This was initially skipped — Hermes' own bundled `copilot_acp_client.py` reference doesn't do real incremental streaming for its subprocess provider either, so `stream=True` first just replayed one finished completion as a single fake chunk — but got built after all once real usage showed the cost of that shortcut (Hermes' UI shows "no stream output" with zero feedback for the entire duration of a `claude` call, indistinguishable from a hang). See Fase 2 in [10-roadmap.md](./10-roadmap.md) for the full story, including a real `--verbose`-requirement bug caught while building this.
 
 ## No `scripts/reload.sh` / systemd equivalent, and why
 

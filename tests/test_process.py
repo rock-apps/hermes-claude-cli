@@ -10,9 +10,11 @@ from plugin.claude_cli.process import (
     ClaudeCLIProcessError,
     CLIResult,
     PermissionConfig,
+    StreamChunk,
     build_args,
     build_subprocess_env,
     run_once,
+    run_streaming,
 )
 
 
@@ -23,6 +25,31 @@ def make_fake_claude(tmp_path: Path, *, stdout: str, exit_code: int = 0, sleep_s
         "import sys, time\n"
         f"time.sleep({sleep_seconds})\n"
         f"sys.stdout.write({stdout!r})\n"
+        f"sys.exit({exit_code})\n"
+    )
+    script_path.chmod(script_path.stat().st_mode | stat.S_IEXEC)
+    return str(script_path)
+
+
+def make_fake_claude_streaming(
+    tmp_path: Path,
+    *,
+    lines: list[str],
+    exit_code: int = 0,
+    delay_before_each: float = 0.0,
+) -> str:
+    """A fake `claude` binary that prints one line per stdout write, with an
+    optional delay before each — used to exercise run_streaming's incremental
+    reads and (with a large enough delay) its timeout path."""
+    script_path = tmp_path / "fake-claude-streaming"
+    lines_literal = repr(lines)
+    script_path.write_text(
+        "#!/usr/bin/env python3\n"
+        "import sys, time\n"
+        f"for line in {lines_literal}:\n"
+        f"    time.sleep({delay_before_each})\n"
+        "    sys.stdout.write(line + chr(10))\n"
+        "    sys.stdout.flush()\n"
         f"sys.exit({exit_code})\n"
     )
     script_path.chmod(script_path.stat().st_mode | stat.S_IEXEC)
@@ -273,6 +300,42 @@ class TestBuildArgs:
         # Assert
         assert args[-2:] == ["--", "hello"]
 
+    def test_stream_true_requests_stream_json_with_partial_messages_and_verbose(
+        self,
+    ) -> None:
+        # Arrange: verified empirically — `--print --output-format stream-json`
+        # without `--verbose` is refused ("requires --verbose").
+        permissions = PermissionConfig()
+
+        # Act
+        args = build_args(
+            model="sonnet",
+            system_prompt="",
+            prompt="hello",
+            permissions=permissions,
+            stream=True,
+        )
+
+        # Assert
+        assert "--output-format" in args
+        assert args[args.index("--output-format") + 1] == "stream-json"
+        assert "--include-partial-messages" in args
+        assert "--verbose" in args
+
+    def test_stream_false_still_requests_plain_json(self) -> None:
+        # Arrange
+        permissions = PermissionConfig()
+
+        # Act
+        args = build_args(
+            model="sonnet", system_prompt="", prompt="hello", permissions=permissions
+        )
+
+        # Assert
+        assert args[args.index("--output-format") + 1] == "json"
+        assert "--include-partial-messages" not in args
+        assert "--verbose" not in args
+
 
 class TestRunOnce:
     def test_success_case_returns_parsed_cli_result(self, tmp_path: Path) -> None:
@@ -353,6 +416,122 @@ class TestRunOnce:
             is_error=False,
             error_message=None,
         )
+
+
+def _stream_event(delta_type: str, **delta_fields: str) -> str:
+    return json.dumps(
+        {
+            "type": "stream_event",
+            "event": {"type": "content_block_delta", "delta": {"type": delta_type, **delta_fields}},
+        }
+    )
+
+
+class TestRunStreaming:
+    def test_yields_text_deltas_then_final_result(self, tmp_path: Path) -> None:
+        # Arrange: shape verified against a real `claude` stream-json invocation.
+        lines = [
+            _stream_event("text_delta", text="Hel"),
+            _stream_event("text_delta", text="lo"),
+            json.dumps(SUCCESS_PAYLOAD),
+        ]
+        binary = make_fake_claude_streaming(tmp_path, lines=lines)
+
+        # Act
+        chunks = list(run_streaming(binary, [], timeout=5.0))
+
+        # Assert
+        assert chunks[0] == StreamChunk(text_delta="Hel")
+        assert chunks[1] == StreamChunk(text_delta="lo")
+        assert chunks[2].is_final is True
+        assert chunks[2].result.text == "4"
+
+    def test_yields_reasoning_deltas_for_thinking_delta(self, tmp_path: Path) -> None:
+        # Arrange
+        lines = [
+            _stream_event("thinking_delta", thinking="carrying the 1..."),
+            json.dumps(SUCCESS_PAYLOAD),
+        ]
+        binary = make_fake_claude_streaming(tmp_path, lines=lines)
+
+        # Act
+        chunks = list(run_streaming(binary, [], timeout=5.0))
+
+        # Assert
+        assert chunks[0] == StreamChunk(reasoning_delta="carrying the 1...")
+
+    def test_ignores_unrelated_event_types(self, tmp_path: Path) -> None:
+        # Arrange: system/rate_limit_event/assistant/non-delta stream_events are
+        # all real event types `claude` emits that carry no incremental text.
+        lines = [
+            json.dumps({"type": "system", "subtype": "hook_started"}),
+            json.dumps({"type": "rate_limit_event", "rate_limit_info": {}}),
+            json.dumps({"type": "assistant", "message": {}}),
+            json.dumps({"type": "stream_event", "event": {"type": "message_start"}}),
+            json.dumps(SUCCESS_PAYLOAD),
+        ]
+        binary = make_fake_claude_streaming(tmp_path, lines=lines)
+
+        # Act
+        chunks = list(run_streaming(binary, [], timeout=5.0))
+
+        # Assert
+        assert len(chunks) == 1
+        assert chunks[0].is_final is True
+
+    def test_cli_reported_error_returns_final_chunk_without_raising(
+        self, tmp_path: Path
+    ) -> None:
+        # Arrange: verified empirically that an unresumable --resume target comes
+        # back as a normal terminal event with is_error=True, not an exception.
+        binary = make_fake_claude_streaming(tmp_path, lines=[json.dumps(ERROR_PAYLOAD)], exit_code=1)
+
+        # Act
+        (chunk,) = list(run_streaming(binary, [], timeout=5.0))
+
+        # Assert
+        assert chunk.is_final is True
+        assert chunk.result.is_error is True
+        assert chunk.result.error_message == ERROR_PAYLOAD["result"]
+
+    def test_ends_without_a_result_event_raises_process_error(self, tmp_path: Path) -> None:
+        # Arrange: process exits (crash) before ever emitting a terminal event.
+        binary = make_fake_claude_streaming(
+            tmp_path, lines=[_stream_event("text_delta", text="partial")], exit_code=1
+        )
+
+        # Act / Assert
+        with pytest.raises(ClaudeCLIProcessError):
+            list(run_streaming(binary, [], timeout=5.0))
+
+    def test_missing_binary_raises_process_error(self, tmp_path: Path) -> None:
+        # Act / Assert
+        with pytest.raises(ClaudeCLIProcessError):
+            list(run_streaming(str(tmp_path / "does-not-exist"), [], timeout=5.0))
+
+    def test_timeout_raises_process_error(self, tmp_path: Path) -> None:
+        # Arrange
+        binary = make_fake_claude_streaming(
+            tmp_path,
+            lines=[_stream_event("text_delta", text="slow"), json.dumps(SUCCESS_PAYLOAD)],
+            delay_before_each=5.0,
+        )
+
+        # Act / Assert
+        with pytest.raises(ClaudeCLIProcessError):
+            list(run_streaming(binary, [], timeout=0.2))
+
+    def test_malformed_json_line_is_skipped_not_fatal(self, tmp_path: Path) -> None:
+        # Arrange
+        lines = ["not json at all", json.dumps(SUCCESS_PAYLOAD)]
+        binary = make_fake_claude_streaming(tmp_path, lines=lines)
+
+        # Act
+        chunks = list(run_streaming(binary, [], timeout=5.0))
+
+        # Assert
+        assert len(chunks) == 1
+        assert chunks[0].is_final is True
 
 
 class TestBuildSubprocessEnv:

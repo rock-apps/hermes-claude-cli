@@ -6,11 +6,13 @@ provider client (agent/copilot_acp_client.py, used by the bundled `copilot-acp`
 provider) — see ../../docs/03-hermes-provider-model.md. No HTTP is involved
 anywhere in this module: every call spawns and waits on a `claude` subprocess.
 
-Streaming (`stream=True`) is not implemented as real token-by-token delivery in this
-phase — see ../../docs/10-roadmap.md, Fase 2. Passing `tools`/`tool_choice` is
-accepted for interface compatibility but has no effect: the `claude` CLI does not
-accept externally-defined tool schemas (see ../../docs/06-claude-cli-reference.md);
-it always uses its own built-in tools transparently.
+Streaming (`stream=True`) delivers real incremental text/reasoning as `claude`
+produces it (`--output-format stream-json --include-partial-messages`), verified
+against a real invocation — see `process.run_streaming`. Passing `tools`/
+`tool_choice` is accepted for interface compatibility but has no effect: the
+`claude` CLI does not accept externally-defined tool schemas (see
+../../docs/06-claude-cli-reference.md); it always uses its own built-in tools
+transparently.
 """
 
 from __future__ import annotations
@@ -26,9 +28,11 @@ from .process import (
     ClaudeCLIProcessError,
     CLIResult,
     PermissionConfig,
+    StreamChunk,
     build_args,
     build_subprocess_env,
     run_once,
+    run_streaming,
 )
 from .protocol import (
     EmptyMessagesError,
@@ -135,13 +139,15 @@ class ClaudeCLIClient:
         Agent process — without this, cleanup logs a harmless but noisy
         AttributeError at debug level)."""
 
-    def _run_turn(
-        self, *, resolved_model: str, messages: list[dict[str, Any]], timeout: float
-    ) -> CLIResult:
+    def _decide_call(
+        self, resolved_model: str, messages: list[dict[str, Any]]
+    ) -> tuple[str, str, str | None]:
+        """Decide the (system_prompt, prompt, resume_session_id) for one call
+        attempt. `resume_session_id` is None when continuity is off, this is the
+        first turn tracked, the model changed, or the history isn't a trusted
+        extension of what was last sent (see `session.compute_delta`) — in every
+        one of those cases the caller gets the full flattened history instead."""
         config = self._config
-        resume_id: str | None = None
-        delta_prompt: str | None = None
-
         if config.session_continuity:
             with self._session_lock:
                 if resolved_model == self._last_model:
@@ -152,14 +158,36 @@ class ClaudeCLIClient:
                         except EmptyMessagesError:
                             delta_prompt = None
                         if delta_prompt:
-                            resume_id = self._last_session_id
+                            return "", delta_prompt, self._last_session_id
+        system_prompt, prompt = flatten_messages(messages)
+        return system_prompt, prompt, None
+
+    def _record_result(
+        self, resolved_model: str, messages: list[dict[str, Any]], result: CLIResult
+    ) -> None:
+        if not self._config.session_continuity:
+            return
+        with self._session_lock:
+            if result.is_error:
+                self._last_session_id = None
+                self._last_messages = None
+            else:
+                self._last_session_id = result.session_id or None
+                self._last_messages = list(messages)
+                self._last_model = resolved_model
+
+    def _run_turn(
+        self, *, resolved_model: str, messages: list[dict[str, Any]], timeout: float
+    ) -> CLIResult:
+        config = self._config
+        system_prompt, prompt, resume_id = self._decide_call(resolved_model, messages)
 
         result: CLIResult | None = None
-        if resume_id and delta_prompt:
+        if resume_id:
             resume_args = build_args(
                 model=resolved_model,
-                system_prompt="",
-                prompt=delta_prompt,
+                system_prompt=system_prompt,
+                prompt=prompt,
                 permissions=_permissions_for(config),
                 max_budget_usd=config.max_budget_usd,
                 resume_session_id=resume_id,
@@ -170,11 +198,12 @@ class ClaudeCLIClient:
                 )
             except ClaudeCLIProcessError:
                 # The session claude knows about is gone (expired, compacted, or
-                # otherwise unresumable) — verified empirically that an unknown
-                # --resume target fails with empty/unparseable stdout and a plain
-                # stderr message, not a normal is_error=true JSON result, so
-                # run_once raises rather than returning a CLIResult here. Drop the
-                # stale tracking and fall through to a full, fresh call below.
+                # otherwise unresumable) — verified empirically that in
+                # --output-format json mode an unknown --resume target fails with
+                # empty/unparseable stdout and a plain stderr message, not a normal
+                # is_error=true JSON result, so run_once raises rather than
+                # returning a CLIResult here. Drop the stale tracking and fall
+                # through to a full, fresh call below.
                 with self._session_lock:
                     self._last_session_id = None
                     self._last_messages = None
@@ -192,17 +221,128 @@ class ClaudeCLIClient:
                 config.binary, fresh_args, env=build_subprocess_env(), timeout=timeout
             )
 
-        if config.session_continuity:
-            with self._session_lock:
-                if result.is_error:
+        self._record_result(resolved_model, messages, result)
+        return result
+
+    def _run_turn_streaming(
+        self, *, resolved_model: str, messages: list[dict[str, Any]], timeout: float
+    ):
+        config = self._config
+        env = build_subprocess_env()
+        system_prompt, prompt, resume_id = self._decide_call(resolved_model, messages)
+
+        def stream_once(sp: str, p: str, rid: str | None):
+            args = build_args(
+                model=resolved_model,
+                system_prompt=sp,
+                prompt=p,
+                permissions=_permissions_for(config),
+                max_budget_usd=config.max_budget_usd,
+                resume_session_id=rid,
+                stream=True,
+            )
+            return run_streaming(config.binary, args, env=env, timeout=timeout)
+
+        yielded_content = False
+        final_result: CLIResult | None = None
+        try:
+            for chunk in stream_once(system_prompt, prompt, resume_id):
+                if chunk.is_final:
+                    final_result = chunk.result
+                    break
+                if chunk.text_delta or chunk.reasoning_delta:
+                    yielded_content = True
+                yield chunk
+        except ClaudeCLIProcessError:
+            # Mirrors _run_turn's resume-failure handling — verified empirically
+            # this specific exception path (nothing parseable at all) is rarer in
+            # streaming mode than in run_once, but stays possible (e.g. the
+            # process crashes before any event, or the timeout fires). Only safe
+            # to retry silently if nothing was yielded to the caller yet.
+            if resume_id and not yielded_content:
+                with self._session_lock:
                     self._last_session_id = None
                     self._last_messages = None
-                else:
-                    self._last_session_id = result.session_id or None
-                    self._last_messages = list(messages)
-                    self._last_model = resolved_model
+                system_prompt, prompt = flatten_messages(messages)
+                for chunk in stream_once(system_prompt, prompt, None):
+                    if chunk.is_final:
+                        self._record_result(resolved_model, messages, chunk.result)
+                    yield chunk
+                return
+            raise
 
-        return result
+        if resume_id and final_result is not None and final_result.is_error and not yielded_content:
+            # Verified empirically: unlike run_once, an unknown --resume target in
+            # streaming mode does NOT raise — it comes back as a normal terminal
+            # chunk with is_error=True and empty text. Safe to retry fresh since
+            # nothing was yielded to the caller yet.
+            with self._session_lock:
+                self._last_session_id = None
+                self._last_messages = None
+            system_prompt, prompt = flatten_messages(messages)
+            for chunk in stream_once(system_prompt, prompt, None):
+                if chunk.is_final:
+                    self._record_result(resolved_model, messages, chunk.result)
+                yield chunk
+            return
+
+        if final_result is not None:
+            self._record_result(resolved_model, messages, final_result)
+            yield StreamChunk(is_final=True, result=final_result)
+
+    def _stream_openai_chunks(self, resolved_model: str, chunks: Any) -> Any:
+        """Convert `StreamChunk`s into the OpenAI `chat.completion.chunk` shape a
+        stream consumer expects: `.choices[i].delta.content` /
+        `.delta.reasoning_content`, not `.choices[i].message` — verified against a
+        real Hermes Agent process (yielding a full completion object for a
+        streaming call raised "'SimpleNamespace' object has no attribute
+        'delta'")."""
+        completion_id = f"chatcmpl-{uuid.uuid4()}"
+        created = int(time.time())
+        for chunk in chunks:
+            if chunk.is_final:
+                result = chunk.result
+                finish_reason = "stop" if result.is_error else map_stop_reason(result.stop_reason)
+                delta_kwargs: dict[str, Any] = {}
+                if result.is_error and result.text:
+                    delta_kwargs["content"] = result.text
+                yield SimpleNamespace(
+                    id=completion_id,
+                    object="chat.completion.chunk",
+                    created=created,
+                    model=resolved_model,
+                    choices=[
+                        SimpleNamespace(
+                            index=0,
+                            delta=SimpleNamespace(**delta_kwargs),
+                            finish_reason=finish_reason,
+                        )
+                    ],
+                    usage=SimpleNamespace(
+                        prompt_tokens=result.input_tokens,
+                        completion_tokens=result.output_tokens,
+                        total_tokens=result.input_tokens + result.output_tokens,
+                        prompt_tokens_details=SimpleNamespace(cached_tokens=0),
+                    ),
+                )
+                return
+            delta_kwargs = {}
+            if chunk.text_delta:
+                delta_kwargs["content"] = chunk.text_delta
+            if chunk.reasoning_delta:
+                delta_kwargs["reasoning_content"] = chunk.reasoning_delta
+            if not delta_kwargs:
+                continue
+            yield SimpleNamespace(
+                id=completion_id,
+                object="chat.completion.chunk",
+                created=created,
+                model=resolved_model,
+                choices=[
+                    SimpleNamespace(index=0, delta=SimpleNamespace(**delta_kwargs), finish_reason=None)
+                ],
+                usage=None,
+            )
 
     def _create_chat_completion(
         self,
@@ -217,22 +357,15 @@ class ClaudeCLIClient:
     ) -> Any:
         config = self._config
         resolved_model = normalize_model_alias(model or "", config.default_model)
-        result = self._run_turn(
-            resolved_model=resolved_model,
-            messages=messages or [],
-            timeout=_effective_timeout(timeout, config.timeout_seconds),
-        )
-        completion = _build_completion(resolved_model, result)
-        if not stream:
-            return completion
-        # Real per-token delivery is Fase 2 (see ../../docs/10-roadmap.md); for now,
-        # mirror Hermes' own copilot-acp reference client and re-shape the one-shot
-        # completion into OpenAI stream chunks via Hermes' shared helper — a stream
-        # consumer expects `.choices[i].delta`, not `.choices[i].message` (verified
-        # against a real Hermes Agent process: yielding the completion object
-        # directly raised "'SimpleNamespace' object has no attribute 'delta'").
-        # Only importable inside a real Hermes process, same as the `providers`
-        # import in __init__.py.
-        from agent.acp_openai_bridge import completion_to_stream_chunks
+        effective_timeout = _effective_timeout(timeout, config.timeout_seconds)
 
-        return completion_to_stream_chunks(completion)
+        if stream:
+            chunks = self._run_turn_streaming(
+                resolved_model=resolved_model, messages=messages or [], timeout=effective_timeout
+            )
+            return self._stream_openai_chunks(resolved_model, chunks)
+
+        result = self._run_turn(
+            resolved_model=resolved_model, messages=messages or [], timeout=effective_timeout
+        )
+        return _build_completion(resolved_model, result)
