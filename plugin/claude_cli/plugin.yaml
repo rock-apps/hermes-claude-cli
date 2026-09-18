@@ -1,0 +1,10 @@
+name: claude-cli-provider
+kind: model-provider
+version: 0.1.0
+description: >-
+  Claude via o CLI local `claude` (assinatura Max) — subprocesso direto,
+  sem servidor HTTP intermediário. Ver docs/05-arquitetura-unificada.md
+  no repositório rock-apps/hermes-claude-cli.
+author: Rock Apps
+homepage: https://github.com/rock-apps/hermes-claude-cli
+license: TBD

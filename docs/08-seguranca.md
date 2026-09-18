@@ -1,0 +1,28 @@
+# 08 — Segurança
+
+## Modelo de ameaça: antes (bridge HTTP) vs. depois (subprocesso direto)
+
+| Vetor | `claude-bridge` original | Arquitetura unificada (subprocesso via `create_client()`) |
+|---|---|---|
+| Rede | Servidor HTTP em `:9180` sem autenticação, e o bind real é `0.0.0.0:9180` (não `127.0.0.1`, apesar do README dizer o contrário — ver [01](./01-analise-claude-bridge.md)). Qualquer processo com acesso à porta gasta a assinatura do usuário. | **Nenhuma porta aberta.** O único canal é stdio de um subprocesso filho do próprio processo do Hermes. Não há superfície de rede a proteger. |
+| Processo persistente | Roda 24/7 como serviço systemd, mesmo sem uso — janela de exposição contínua. | Subprocesso existe apenas durante a chamada (ou durante a sessão, em v2) — janela de exposição mínima e delimitada. |
+| Acesso a filesystem | Opção "fácil" documentada é `--dangerously-skip-permissions` = acesso total ao filesystem do usuário. | Mesmo risco existe se configurarmos o modo de permissão errado — **não é eliminado pela mudança de transporte**, precisa de decisão explícita (ver abaixo). |
+| Execução de comandos (Bash) | O `claude` CLI, por padrão, tem a ferramenta Bash disponível — um provider headless pode acabar permitindo que o modelo rode comandos de shell arbitrários "em nome" de uma chamada de chat comum do Hermes, sem o usuário perceber. | Mesmo risco, herdado do CLI em si. Mitigável com `--restricted` (remove Bash/PowerShell/REPL/WebFetch) — ver [06](./06-referencia-cli-claude.md). Vale considerar como **default**, não opcional, para o caso de uso "provider de chat", reservando modo irrestrito só para quem explicitamente quer que o provider também aja como agente com acesso a ferramentas do sistema. |
+| Vazamento de variáveis de ambiente | O bridge documenta o risco ("Subprocesses inherit the bridge's env. Don't put untrusted env vars in the systemd unit.") mas não faz nada a respeito. | O subprocesso deve herdar um ambiente **explicitamente filtrado**, não `os.environ` inteiro — mesma preocupação que o `hermes_subprocess_env(inherit_credentials=True)` do `copilot_acp_client.py` de referência resolve (strip de segredos "tier 1" antes de repassar ao filho). Adotar padrão equivalente. |
+| Redação de conteúdo sensível | Inexistente no bridge original. | O `copilot_acp_client.py` de referência usa `redact_sensitive_text()` antes de devolver conteúdo lido do filesystem. Avaliar se o `claude` CLI já faz proteção equivalente nativamente (provavelmente sim, dado que é o mesmo produto Anthropic que já implementa proteções de leitura) — item a validar na fase de implementação, não assumir sem checar. |
+| Custo/gasto descontrolado | Sem teto de gasto por chamada. | `--max-budget-usd` disponível nativamente no CLI (ver [06](./06-referencia-cli-claude.md)) — deve ser exposto como configuração, não é usado por padrão hoje. |
+
+## Decisão pendente: modo de permissão padrão
+
+Duas opções, ambas válidas, mas com trade-offs diferentes — **fica registrado como decisão em aberto para validar com o usuário antes de implementar** (não é uma escolha puramente técnica, depende do apetite a risco do ambiente onde isso vai rodar):
+
+1. **Restritivo por padrão** (`--permission-mode dontAsk` ou equivalente + `--permission-prompts none` + `--restricted` + `--add-dir` explícito só para os diretórios que o Hermes já opera). Comportamento: qualquer ação que exigiria confirmação humana é automaticamente negada; sem acesso a Bash/execução de código. Mais seguro, mas pode fazer o modelo "falhar silenciosamente" em tarefas que dependeriam de rodar comandos.
+2. **Permissivo, espelhando o original** (`--dangerously-skip-permissions` sempre). Comportamento idêntico ao `claude-bridge` hoje. Mais funcional "out of the box", mas herda o mesmo risco que o próprio README do projeto original assume como aceitável **apenas** "on personal machines" — o que pode não valer para o ambiente de uso real da Rock Apps (múltiplos usuários, uso via Hermes automatizado/cron/Telegram/Matrix, conforme a própria descrição do Hermes Agent em [02](./02-analise-hermes-claude-cli-original.md)).
+
+Recomendação preliminar (a confirmar): opção 1 como default, com opção 2 disponível via variável de ambiente explícita (`CLAUDE_CLI_PERMISSION_MODE=bypass`) para quem entende o risco e opera em máquina pessoal — mesma filosofia de opt-in explícito que o próprio bridge original já usava para `CLAUDE_BYPASS_PERMISSIONS`.
+
+## Itens de hardening para o roadmap (não bloqueiam v1, mas devem ser rastreados)
+
+- Confinamento de paths (`_ensure_path_within_cwd` no `copilot_acp_client.py` de referência é um bom modelo) caso o plugin precise manipular paths recebidos de fora antes de repassar ao CLI.
+- Auditoria de log: o bridge original loga `model`, contagem de mensagens e tools por request — manter esse nível de observabilidade (sem logar conteúdo de prompt completo, que pode conter dados sensíveis do usuário).
+- Revisão do que acontece se múltiplas chamadas concorrentes tentarem usar o mesmo `--session-id` (v2) — condição de corrida potencial a testar antes de habilitar sessões contínuas por padrão.

@@ -1,0 +1,110 @@
+"""Environment-variable configuration for the claude-cli provider plugin.
+
+Full configuration surface is documented in ../../docs/07-configuracao.md. Unlike the
+original claude-bridge, there is no hardcoded list of personal directories — see
+../../docs/01-analise-claude-bridge.md for why that was a problem worth not repeating.
+
+``CLAUDE_CLI_PERMISSION_MODE`` defaults to "auto": Claude Code's own smart
+auto-approval heuristic (the same mode this project's own development sessions run
+under), combined unconditionally with ``--permission-prompts none`` in process.py so
+that anything the heuristic would otherwise stop to ask about is denied instead of
+hanging forever with no human to answer. This resolves the security default that was
+left open in ../../docs/08-seguranca.md; override via ``CLAUDE_CLI_PERMISSION_MODE``
+if a different mode is needed.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+
+_LEGACY_BIN_CANDIDATES = (
+    os.path.expanduser("~/.local/bin/claude"),
+    "/usr/local/bin/claude",
+)
+_DEFAULT_MODEL = "sonnet"
+_DEFAULT_PERMISSION_MODE = "auto"
+_DEFAULT_TIMEOUT_SECONDS = 300.0
+
+
+@dataclass(frozen=True)
+class ClaudeCLIConfig:
+    """Resolved configuration for one `claude` CLI invocation."""
+
+    binary: str
+    default_model: str = _DEFAULT_MODEL
+    allowed_dirs: tuple[str, ...] = field(default_factory=tuple)
+    permission_mode: str = _DEFAULT_PERMISSION_MODE
+    restricted: bool = False
+    max_budget_usd: float | None = None
+    timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS
+
+
+class ClaudeBinaryNotFoundError(RuntimeError):
+    """Raised when no usable `claude` binary can be located."""
+
+
+def find_claude_binary(env: Mapping[str, str]) -> str:
+    """Locate the `claude` CLI binary.
+
+    Resolution order: ``CLAUDE_CLI_BIN`` env var, then ``CLAUDE_BIN`` (legacy name
+    from the original claude-bridge, kept for migration convenience), then a couple
+    of well-known install locations, then whatever `claude` resolves to on PATH.
+    Raises ClaudeBinaryNotFoundError if none of those exist.
+    """
+    explicit = env.get("CLAUDE_CLI_BIN") or env.get("CLAUDE_BIN")
+    if explicit:
+        return explicit
+    for candidate in _LEGACY_BIN_CANDIDATES:
+        if os.path.isfile(candidate):
+            return candidate
+    found = shutil.which("claude")
+    if found:
+        return found
+    raise ClaudeBinaryNotFoundError(
+        "Could not locate the `claude` binary. Set CLAUDE_CLI_BIN=/path/to/claude "
+        "or install Claude Code: https://claude.ai/code"
+    )
+
+
+def _parse_allowed_dirs(raw: str) -> tuple[str, ...]:
+    home = os.path.expanduser("~")
+    dirs: list[str] = []
+    for part in raw.split(":"):
+        candidate = part.strip()
+        if not candidate:
+            continue
+        if candidate.startswith("~"):
+            candidate = home + candidate[1:]
+        if os.path.isdir(candidate):
+            dirs.append(candidate)
+    return tuple(dirs)
+
+
+def _parse_bool(raw: str) -> bool:
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def load_config(env: Mapping[str, str] | None = None) -> ClaudeCLIConfig:
+    """Build a ClaudeCLIConfig by reading environment variables.
+
+    Pass an explicit `env` mapping (e.g. in tests) to avoid depending on the real
+    process environment; defaults to `os.environ`.
+    """
+    resolved_env = env if env is not None else os.environ
+    max_budget_raw = resolved_env.get("CLAUDE_CLI_MAX_BUDGET_USD", "").strip()
+    return ClaudeCLIConfig(
+        binary=find_claude_binary(resolved_env),
+        default_model=resolved_env.get("CLAUDE_CLI_DEFAULT_MODEL", "").strip()
+        or _DEFAULT_MODEL,
+        allowed_dirs=_parse_allowed_dirs(resolved_env.get("CLAUDE_CLI_ALLOWED_DIRS", "")),
+        permission_mode=resolved_env.get("CLAUDE_CLI_PERMISSION_MODE", "").strip()
+        or _DEFAULT_PERMISSION_MODE,
+        restricted=_parse_bool(resolved_env.get("CLAUDE_CLI_RESTRICTED", "")),
+        max_budget_usd=float(max_budget_raw) if max_budget_raw else None,
+        timeout_seconds=float(
+            resolved_env.get("CLAUDE_CLI_TIMEOUT_SECONDS", "") or _DEFAULT_TIMEOUT_SECONDS
+        ),
+    )

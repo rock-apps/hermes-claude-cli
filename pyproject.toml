@@ -1,0 +1,12 @@
+[project]
+name = "hermes-claude-cli"
+version = "0.1.0"
+description = "Hermes Agent provider plugin for the Claude CLI (Max subscription) — subprocess-based, no HTTP bridge."
+requires-python = ">=3.10"
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
