@@ -10,7 +10,7 @@ The maintainer asked: *"what if that bridge isn't actually necessary? Analyze it
 
 ### Part 1 — is the bridge's *function* necessary?
 
-**Yes.** The `claude` CLI exposes no HTTP API; it's invoked via command line with stdin/stdout/argv. Hermes Agent, meanwhile, models every model provider as something that speaks a network `api_mode` (`chat_completions`, `anthropic_messages`, or `codex_responses`) — see [03](./03-modelo-de-provider-do-hermes.md). There's no "protocol-less generic provider" in Hermes — even the closest case (`copilot-acp`) still advertises `api_mode="chat_completions"` and implements a client class exposing `.chat.completions.create()`.
+**Yes.** The `claude` CLI exposes no HTTP API; it's invoked via command line with stdin/stdout/argv. Hermes Agent, meanwhile, models every model provider as something that speaks a network `api_mode` (`chat_completions`, `anthropic_messages`, or `codex_responses`) — see [03](./03-hermes-provider-model.md). There's no "protocol-less generic provider" in Hermes — even the closest case (`copilot-acp`) still advertises `api_mode="chat_completions"` and implements a client class exposing `.chat.completions.create()`.
 
 Conclusion: some translation layer between "a Hermes provider call" and "a `claude` CLI invocation" is mandatory. That responsibility can't be eliminated.
 
@@ -40,10 +40,10 @@ This plugin runs no separate HTTP server. Instead:
 
 ### Positive
 
-- **Removes the entire network attack surface.** There's no more "unauthenticated port 9180 listening on `0.0.0.0`" (a real risk in the original — see [01](./01-analise-claude-bridge.md)) — because there's no port at all.
+- **Removes the entire network attack surface.** There's no more "unauthenticated port 9180 listening on `0.0.0.0`" (a real risk in the original — see [01](./01-analysis-claude-bridge.md)) — because there's no port at all.
 - **One repository, one language.** No more Go + Python, two git repositories, a clone-at-install-time step, or an extra toolchain. The whole plugin is Python, in the same process Hermes already runs.
 - **No extra systemd process to keep alive, restart, or monitor.** The `claude` subprocess lives and dies with each call (or with a resumed session, see Fase 4 in [10-roadmap.md](./10-roadmap.md)), managed entirely by Hermes' own process lifecycle.
-- **Access to CLI capabilities the HTTP bridge never used**: real cost/usage accounting via `--output-format json`, session resume via `--resume`, and permission modes more granular than "bypass everything" — see [06](./06-referencia-cli-claude.md) and [08](./08-seguranca.md).
+- **Access to CLI capabilities the HTTP bridge never used**: real cost/usage accounting via `--output-format json`, session resume via `--resume`, and permission modes more granular than "bypass everything" — see [06](./06-claude-cli-reference.md) and [08](./08-security.md).
 - **Simpler install.** No `go build`, no cloning a second repository, no systemd unit to edit.
 
 ### Trade-offs

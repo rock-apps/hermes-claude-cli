@@ -7,10 +7,10 @@ credits.
 
 Architecture rationale and the decision not to use an HTTP bridge (unlike this
 plugin's inspirations, niski84/claude-bridge and niski84/hermes-claude-cli) are in
-../../docs/04-decisao-bridge-e-necessario.md and
-../../docs/05-arquitetura-unificada.md. The `auth_type="external_process"` +
+../../docs/04-is-bridge-necessary.md and
+../../docs/05-unified-architecture.md. The `auth_type="external_process"` +
 `create_client()` pattern used below mirrors Hermes Agent's own bundled
-`copilot-acp` provider — see ../../docs/03-modelo-de-provider-do-hermes.md.
+`copilot-acp` provider — see ../../docs/03-hermes-provider-model.md.
 
 This module is only meaningful when imported inside a running Hermes Agent process
 (it needs the `providers` package on sys.path). Importing it anywhere else — e.g.

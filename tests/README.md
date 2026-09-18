@@ -1,19 +1,20 @@
-# Testes
+# Tests
 
-54 testes, todos passando (`pytest -q` → `54 passed`). Nenhum invoca o `claude` CLI real — subprocessos são simulados com um binário fake em `test_process.py`, e `test_client.py`/`test_config.py` usam `monkeypatch`. Isso mantém a suíte rápida (~0.3s) e sem custo de uso real da assinatura.
+81 tests, all passing (`pytest -q` → `81 passed`). None invoke the real `claude` CLI — subprocesses are simulated with a fake binary in `test_process.py`, and `test_client.py`/`test_config.py`/`test_session.py` use `monkeypatch`. This keeps the suite fast (~0.4s) with no real subscription usage cost.
 
-| Arquivo | Cobre |
+| File | Covers |
 |---|---|
-| `test_protocol.py` | achatamento de mensagens, normalização de alias de modelo, mapeamento de `stop_reason` (23 testes) |
-| `test_process.py` | construção de argv (`build_args`) e spawn/parse do subprocesso (`run_once`), incluindo o caminho de erro real do CLI e timeout (14 testes) |
-| `test_config.py` | resolução de variáveis de ambiente e defaults (9 testes) |
-| `test_client.py` | orquestração do `ClaudeCLIClient` (normalização de modelo, wiring de permissões, forma da resposta) com `run_once` mockado (8 testes) |
-| `test_plugin_init.py` | `plugin/claude_cli/__init__.py` não quebra quando importado fora de um processo Hermes real (1 teste) |
+| `test_protocol.py` | message flattening, model alias normalization, `stop_reason` mapping (23 tests) |
+| `test_process.py` | argv construction (`build_args`), subprocess spawn/parse (`run_once`), the subprocess environment allowlist (`build_subprocess_env`) — including the real CLI error path and a timeout (20 tests) |
+| `test_config.py` | environment variable resolution and defaults (9 tests) |
+| `test_client.py` | `ClaudeCLIClient` orchestration (model normalization, permission wiring, response shape, session-continuity fallback behavior) with `run_once` mocked (22 tests) |
+| `test_session.py` | `compute_delta()` pure logic — when a turn can safely resume the previous one (6 tests) |
+| `test_plugin_init.py` | `plugin/claude_cli/__init__.py` doesn't break when imported outside a real Hermes process (1 test) |
 
-Rodar tudo:
+Run everything:
 ```
 cd /mnt/dev/projects-rk/hermes-claude-cli
 .venv/bin/python -m pytest -q
 ```
 
-Um smoke test manual real (não automatizado — para não gastar uso da assinatura a cada execução da suíte) está documentado em `../docs/10-roadmap.md`, seção "Fase 1".
+A real, manual smoke test (not automated, to avoid spending subscription usage on every suite run) is documented in `../docs/10-roadmap.md`.

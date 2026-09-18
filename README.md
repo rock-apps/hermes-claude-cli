@@ -37,14 +37,14 @@ cd hermes-claude-cli
 
 This symlinks `plugin/claude_cli/` into `$HERMES_HOME/plugins/model-providers/claude-cli` (default `~/.hermes`), so local edits apply immediately without reinstalling — this is the flow used to develop this project. No build step, no systemd unit.
 
-Configuration is via environment variables (all optional) — see [`docs/07-configuracao.md`](./docs/07-configuracao.md).
+Configuration is via environment variables (all optional) — see [`docs/07-configuration.md`](./docs/07-configuration.md).
 
 ## Documentation
 
 Start at [`docs/README.md`](./docs/README.md). Highlights:
 
-- [`docs/04-decisao-bridge-e-necessario.md`](./docs/04-decisao-bridge-e-necessario.md) — why this project does **not** run an HTTP server, unlike the projects that inspired it.
-- [`docs/05-arquitetura-unificada.md`](./docs/05-arquitetura-unificada.md) — architecture.
+- [`docs/04-is-bridge-necessary.md`](./docs/04-is-bridge-necessary.md) — why this project does **not** run an HTTP server, unlike the projects that inspired it.
+- [`docs/05-unified-architecture.md`](./docs/05-unified-architecture.md) — architecture.
 - [`docs/10-roadmap.md`](./docs/10-roadmap.md) — implementation phases and status.
 
 ## Reference projects

@@ -42,12 +42,12 @@ A no-op `close()` was also added (Hermes calls it unconditionally during provide
 
 **Fase 1 — functional provider parity.** `plugin/claude_cli/{protocol,process,config,client,models,__init__}.py`. Real `--output-format json` parsing (`total_cost_usd`/`usage`/`session_id`/`is_error`) — fixes the original bridge's bug of those fields always being zero. CLI JSON schema verified empirically against a real installed `claude` CLI (v2.1.276), not assumed.
 
-**Fase 2 — real token streaming: deliberately not built.** Investigating Hermes' own reference client (`agent/copilot_acp_client.py`, used by the bundled `copilot-acp` provider) showed that even Nous Research's official subprocess-based provider doesn't do real incremental streaming — it builds the full response and converts it to chunks via a shared Hermes helper. This plugin does the same (`stream=True` returns a single-chunk `iter([completion])`). Real work for this phase, if ever revisited: `--output-format stream-json --include-partial-messages` (event schema already captured in [06](./06-referencia-cli-claude.md)) feeding incremental events into a streaming version of that same conversion helper — would need confirming the helper can accept incremental input rather than only a finished completion.
+**Fase 2 — real token streaming: deliberately not built.** Investigating Hermes' own reference client (`agent/copilot_acp_client.py`, used by the bundled `copilot-acp` provider) showed that even Nous Research's official subprocess-based provider doesn't do real incremental streaming — it builds the full response and converts it to chunks via a shared Hermes helper. This plugin does the same (`stream=True` returns a single-chunk `iter([completion])`). Real work for this phase, if ever revisited: `--output-format stream-json --include-partial-messages` (event schema already captured in [06](./06-claude-cli-reference.md)) feeding incremental events into a streaming version of that same conversion helper — would need confirming the helper can accept incremental input rather than only a finished completion.
 
 **Fase 3 — security hardening.**
-- Permission mode and `--restricted` defaults resolved (see [08-seguranca.md](./08-seguranca.md)).
+- Permission mode and `--restricted` defaults resolved (see [08-security.md](./08-security.md)).
 - Subprocess environment allowlist (`process.build_subprocess_env()`): only `HOME`, `PATH`, `LANG`/`LC_*`, `TERM`, `TMPDIR`, `USER`, `LOGNAME`, `SHELL` pass through. Found in the process: a leaked `ANTHROPIC_API_KEY` silently overrides OAuth/Max auth and makes the CLI try to bill against that key instead — confirmed empirically, this is why the filter is an allowlist rather than a blocklist.
-- Sensitive-content redaction: evaluated and deliberately not implemented — see [08-seguranca.md](./08-seguranca.md) for why.
+- Sensitive-content redaction: evaluated and deliberately not implemented — see [08-security.md](./08-security.md) for why.
 - Real bug found and fixed: `--add-dir` is a variadic CLI flag; without a `--` separator, a prompt not starting with `-` was silently swallowed as one more directory whenever `CLAUDE_CLI_ALLOWED_DIRS` was set, failing with "Input must be provided...". Fixed by always inserting `--` before the prompt.
 - Open: no default cap for `--max-budget-usd` (unset = unlimited) — a posture choice, not a bug.
 
@@ -68,8 +68,8 @@ Deliberately out of scope: no cross-process persistence (tracking is per-`Claude
 
 ## Fase 6 (optional, on demand): dual HTTP mode
 
-Only relevant if a real need appears to reuse this plugin's logic from tools outside Hermes (Open WebUI, Cursor, etc. — what the original `claude-bridge`'s HTTP endpoint allowed). See the rejected alternative in [04-decisao-bridge-e-necessario.md](./04-decisao-bridge-e-necessario.md#alternative-considered-and-rejected). Not built preemptively.
+Only relevant if a real need appears to reuse this plugin's logic from tools outside Hermes (Open WebUI, Cursor, etc. — what the original `claude-bridge`'s HTTP endpoint allowed). See the rejected alternative in [04-is-bridge-necessary.md](./04-is-bridge-necessary.md#alternative-considered-and-rejected). Not built preemptively.
 
 ## Permanently out of scope
 
-`model-router` and `zai-proxy` (routing the Claude Code CLI's own model backend to DeepSeek/z.ai) — see [09-escopo-e-migracao.md](./09-escopo-e-migracao.md). If ever wanted, it's a separate project, not part of this plugin.
+`model-router` and `zai-proxy` (routing the Claude Code CLI's own model backend to DeepSeek/z.ai) — see [09-scope-and-migration.md](./09-scope-and-migration.md). If ever wanted, it's a separate project, not part of this plugin.

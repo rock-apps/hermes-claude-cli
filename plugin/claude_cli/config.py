@@ -1,15 +1,15 @@
 """Environment-variable configuration for the claude-cli provider plugin.
 
-Full configuration surface is documented in ../../docs/07-configuracao.md. Unlike the
+Full configuration surface is documented in ../../docs/07-configuration.md. Unlike the
 original claude-bridge, there is no hardcoded list of personal directories — see
-../../docs/01-analise-claude-bridge.md for why that was a problem worth not repeating.
+../../docs/01-analysis-claude-bridge.md for why that was a problem worth not repeating.
 
 ``CLAUDE_CLI_PERMISSION_MODE`` defaults to "auto": Claude Code's own smart
 auto-approval heuristic (the same mode this project's own development sessions run
 under), combined unconditionally with ``--permission-prompts none`` in process.py so
 that anything the heuristic would otherwise stop to ask about is denied instead of
 hanging forever with no human to answer. This resolves the security default that was
-left open in ../../docs/08-seguranca.md; override via ``CLAUDE_CLI_PERMISSION_MODE``
+left open in ../../docs/08-security.md; override via ``CLAUDE_CLI_PERMISSION_MODE``
 if a different mode is needed.
 
 ``CLAUDE_CLI_RESTRICTED`` defaults to true: this plugin's job is "answer a chat

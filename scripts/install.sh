@@ -3,7 +3,7 @@
 #
 # Symlinks the claude-cli provider plugin into a Hermes Agent installation. No HTTP
 # bridge, no second repository to clone, no Go toolchain, no systemd unit — see
-# docs/04-decisao-bridge-e-necessario.md for why this project doesn't need any of
+# docs/04-is-bridge-necessary.md for why this project doesn't need any of
 # that (unlike the two third-party projects it replaces).
 #
 # Prerequisites:
@@ -93,7 +93,7 @@ Next:
 Or verify directly:
   python -m hermes_cli.main -z "hello" --provider claude-cli -m sonnet
 
-Configuration (all optional, see docs/07-configuracao.md):
+Configuration (all optional, see docs/07-configuration.md):
   CLAUDE_CLI_BIN, CLAUDE_CLI_DEFAULT_MODEL, CLAUDE_CLI_ALLOWED_DIRS,
   CLAUDE_CLI_PERMISSION_MODE, CLAUDE_CLI_RESTRICTED,
   CLAUDE_CLI_MAX_BUDGET_USD, CLAUDE_CLI_TIMEOUT_SECONDS

@@ -37,7 +37,7 @@
                  Claude Max subscription (base plan allowance)
 ```
 
-Compare with the original two-repository design: see the equivalent diagram in [01](./01-analise-claude-bridge.md) — that one had a network hop (`HTTP :9180`) and a systemd process, both absent here.
+Compare with the original two-repository design: see the equivalent diagram in [01](./01-analysis-claude-bridge.md) — that one had a network hop (`HTTP :9180`) and a systemd process, both absent here.
 
 ## Module layout (`plugin/claude_cli/`)
 
@@ -83,7 +83,7 @@ The `providers`/`providers.base` imports are guarded with `try/except ImportErro
 
 ### `client.py` — `ClaudeCLIClient`
 
-Mirrors `CopilotACPClient`'s minimal surface (see [03](./03-modelo-de-provider-do-hermes.md)):
+Mirrors `CopilotACPClient`'s minimal surface (see [03](./03-hermes-provider-model.md)):
 - `.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create_chat_completion))`
 - `HERMES_SKIP_TRANSPORT_WRAP = True` — tells Hermes not to re-wrap this client in its generic HTTP transport.
 - `close()` is a no-op (Hermes calls it unconditionally on cleanup; each call here is already self-contained).
@@ -93,11 +93,11 @@ Mirrors `CopilotACPClient`'s minimal surface (see [03](./03-modelo-de-provider-d
 
 ### `protocol.py`
 
-Pure translation functions, no I/O: `flatten_messages()` (system prompt + transcript + current message, ported and corrected from `claude-bridge`'s Go `flattenMessages`/`stringifyContent` — see [01](./01-analise-claude-bridge.md) for the bug this fixes), `normalize_model_alias()` (collapses a full model ID to a bare alias when it matches `sonnet`/`opus`/`haiku`), `map_stop_reason()` (`claude`'s `stop_reason` → an OpenAI `finish_reason`).
+Pure translation functions, no I/O: `flatten_messages()` (system prompt + transcript + current message, ported and corrected from `claude-bridge`'s Go `flattenMessages`/`stringifyContent` — see [01](./01-analysis-claude-bridge.md) for the bug this fixes), `normalize_model_alias()` (collapses a full model ID to a bare alias when it matches `sonnet`/`opus`/`haiku`), `map_stop_reason()` (`claude`'s `stop_reason` → an OpenAI `finish_reason`).
 
 ### `process.py`
 
-`build_args()` builds the CLI argv (always ends with `-- <prompt>`, a deliberate separator — `--add-dir` is variadic and would otherwise swallow a prompt that doesn't start with `-`, see [08-seguranca.md](./08-seguranca.md)). `run_once()` runs `claude` via `subprocess.run(..., check=False)` and always tries `json.loads()` on stdout first, regardless of exit code — the CLI reports its own API-level errors (bad model, etc.) inside a well-formed JSON payload with `is_error: true`, not via a non-JSON crash. `build_subprocess_env()` is the allowlist described in [08-seguranca.md](./08-seguranca.md).
+`build_args()` builds the CLI argv (always ends with `-- <prompt>`, a deliberate separator — `--add-dir` is variadic and would otherwise swallow a prompt that doesn't start with `-`, see [08-security.md](./08-security.md)). `run_once()` runs `claude` via `subprocess.run(..., check=False)` and always tries `json.loads()` on stdout first, regardless of exit code — the CLI reports its own API-level errors (bad model, etc.) inside a well-formed JSON payload with `is_error: true`, not via a non-JSON crash. `build_subprocess_env()` is the allowlist described in [08-security.md](./08-security.md).
 
 ### `session.py`
 
@@ -105,7 +105,7 @@ Pure translation functions, no I/O: `flatten_messages()` (system prompt + transc
 
 ## Streaming: what's actually implemented
 
-`stream=True` does not deliver real token-by-token output. Investigating this while implementing revealed that even Hermes' own bundled reference client, `copilot_acp_client.py`, doesn't do incremental streaming for a subprocess-based provider either — it builds the full response first and converts it to stream chunks via the shared `agent.acp_openai_bridge.completion_to_stream_chunks()` helper. This plugin does the same. Real `--output-format stream-json --include-partial-messages` support (the CLI does support it — see [06](./06-referencia-cli-claude.md)) is tracked as Fase 2 in [10-roadmap.md](./10-roadmap.md), not implemented, and not clearly worth it given even the reference implementation doesn't bother.
+`stream=True` does not deliver real token-by-token output. Investigating this while implementing revealed that even Hermes' own bundled reference client, `copilot_acp_client.py`, doesn't do incremental streaming for a subprocess-based provider either — it builds the full response first and converts it to stream chunks via the shared `agent.acp_openai_bridge.completion_to_stream_chunks()` helper. This plugin does the same. Real `--output-format stream-json --include-partial-messages` support (the CLI does support it — see [06](./06-claude-cli-reference.md)) is tracked as Fase 2 in [10-roadmap.md](./10-roadmap.md), not implemented, and not clearly worth it given even the reference implementation doesn't bother.
 
 ## No `scripts/reload.sh` / systemd equivalent, and why
 

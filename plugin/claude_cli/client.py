@@ -3,13 +3,13 @@
 
 Mirrors the minimal surface of Hermes Agent's own reference subprocess-backed
 provider client (agent/copilot_acp_client.py, used by the bundled `copilot-acp`
-provider) — see ../../docs/03-modelo-de-provider-do-hermes.md. No HTTP is involved
+provider) — see ../../docs/03-hermes-provider-model.md. No HTTP is involved
 anywhere in this module: every call spawns and waits on a `claude` subprocess.
 
 Streaming (`stream=True`) is not implemented as real token-by-token delivery in this
 phase — see ../../docs/10-roadmap.md, Fase 2. Passing `tools`/`tool_choice` is
 accepted for interface compatibility but has no effect: the `claude` CLI does not
-accept externally-defined tool schemas (see ../../docs/06-referencia-cli-claude.md);
+accept externally-defined tool schemas (see ../../docs/06-claude-cli-reference.md);
 it always uses its own built-in tools transparently.
 """
 
