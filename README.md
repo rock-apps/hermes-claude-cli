@@ -2,7 +2,7 @@
 
 Plugin de provider de modelo para o [Hermes Agent](https://github.com/NousResearch/hermes-agent) que expõe o CLI oficial `claude` (Claude Code), autenticado via assinatura **Claude Max**, como um provider de primeira classe — sem servidor HTTP intermediário.
 
-> **Status**: Fase 1 implementada, testada (65 testes) e validada de ponta a ponta dentro de um Hermes Agent real. Veja [`docs/10-roadmap.md`](./docs/10-roadmap.md) para o que exatamente foi feito e o que falta, e [`CLAUDE.md`](./CLAUDE.md) para o resumo orientado a quem for continuar o desenvolvimento.
+> **Status**: Fases 1, 3, 4 e 5 implementadas, testadas (81 testes) e validadas de ponta a ponta dentro de um Hermes Agent real (inclusive contra a versão pessoal do mantenedor, pós-`hermes update`). Veja [`docs/10-roadmap.md`](./docs/10-roadmap.md) para o que exatamente foi feito e o que falta, e [`CLAUDE.md`](./CLAUDE.md) para o resumo orientado a quem for continuar o desenvolvimento.
 
 ## Por quê
 
@@ -12,17 +12,30 @@ Ferramentas de terceiro que falam a API da Anthropic via chave de API (ou OAuth 
 
 Pré-requisitos: [Claude Code](https://claude.ai/code) instalado e autenticado, e o [Hermes Agent](https://github.com/NousResearch/hermes-agent) instalado.
 
+### Opção 1 — um comando só (recomendado para usar o plugin)
+
 ```bash
-git clone <url-deste-repositório> hermes-claude-cli
-cd hermes-claude-cli
-./scripts/install.sh
+hermes plugins install rock-apps/hermes-claude-cli/plugin/claude_cli --enable
+hermes gateway restart   # se o gateway já estiver rodando
 ```
 
-Isso symlinka `plugin/claude_cli/` em `$HERMES_HOME/plugins/model-providers/claude-cli` (default `~/.hermes`). Sem build, sem clonar um segundo repositório, sem serviço systemd. Depois:
+Sem clonar nada na mão — o próprio `hermes` clona (só o subdiretório do plugin, não o repositório de análise/docs inteiro), passa pelo scanner de segurança embutido do Hermes e habilita. Depois:
 
 ```bash
 hermes model   # procure por "Claude CLI (Max subscription)"
 ```
+
+Atualizar para uma versão nova depois: `hermes plugins update claude-cli-provider`.
+
+### Opção 2 — clone manual (recomendado só para desenvolver este plugin)
+
+```bash
+git clone https://github.com/rock-apps/hermes-claude-cli.git
+cd hermes-claude-cli
+./scripts/install.sh
+```
+
+Isso symlinka `plugin/claude_cli/` em `$HERMES_HOME/plugins/model-providers/claude-cli` (default `~/.hermes`), então qualquer edição local no repositório já reflete no Hermes sem reinstalar — é o fluxo usado durante o desenvolvimento deste projeto. Sem build, sem serviço systemd.
 
 Configuração via variáveis de ambiente (todas opcionais) em [`docs/07-configuracao.md`](./docs/07-configuracao.md).
 
