@@ -91,6 +91,7 @@ class TestBuildArgs:
             "json",
             "--permission-prompts",
             "none",
+            "--",
             "hello",
         ]
 
@@ -118,6 +119,7 @@ class TestBuildArgs:
             "be concise",
             "--permission-prompts",
             "none",
+            "--",
             "hello",
         ]
 
@@ -235,6 +237,41 @@ class TestBuildArgs:
 
         # Assert
         assert args[-1] == "hello world"
+
+    def test_prompt_is_preceded_by_a_double_dash_separator(self) -> None:
+        # Arrange: `--add-dir` is variadic, so without a "--" separator a prompt
+        # that doesn't start with "-" is silently swallowed as one more directory
+        # instead of reaching `claude` as the prompt — verified empirically against
+        # a real `claude` invocation (it fails with "Input must be provided either
+        # through stdin or as a prompt argument" when this regresses).
+        permissions = PermissionConfig(allowed_dirs=("/a", "/b"))
+
+        # Act
+        args = build_args(
+            model="sonnet",
+            system_prompt="",
+            prompt="hello",
+            permissions=permissions,
+        )
+
+        # Assert
+        assert args[-2:] == ["--", "hello"]
+
+    def test_double_dash_separator_present_even_without_allowed_dirs(self) -> None:
+        # Arrange: unconditional, not just when allowed_dirs is non-empty — a future
+        # variadic flag before the prompt must not reintroduce the same bug.
+        permissions = PermissionConfig()
+
+        # Act
+        args = build_args(
+            model="sonnet",
+            system_prompt="",
+            prompt="hello",
+            permissions=permissions,
+        )
+
+        # Assert
+        assert args[-2:] == ["--", "hello"]
 
 
 class TestRunOnce:

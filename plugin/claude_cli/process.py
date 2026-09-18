@@ -110,7 +110,14 @@ def build_args(
     if max_budget_usd is not None:
         args += ["--max-budget-usd", str(max_budget_usd)]
 
-    args.append(prompt)
+    # `--add-dir` takes a variadic list of paths, so a prompt that doesn't start
+    # with "-" (the overwhelming common case) would otherwise be silently consumed
+    # as one more directory instead of reaching `claude` as the prompt — verified
+    # empirically: with allowed_dirs set and no separator, the CLI exits with
+    # "Input must be provided either through stdin or as a prompt argument". "--"
+    # unconditionally ends option parsing before the positional prompt, which the
+    # CLI accepts even when no variadic flag precedes it.
+    args += ["--", prompt]
     return args
 
 

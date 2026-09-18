@@ -7,14 +7,25 @@
 # that (unlike the two third-party projects it replaces).
 #
 # Prerequisites:
-#   1. Claude Code CLI installed and authenticated: https://claude.ai/code
-#   2. Hermes Agent installed: https://github.com/NousResearch/hermes-agent
+#   1. Claude Code CLI, authenticated with a Claude Max subscription. Offered
+#      below via the official installer if missing; you still need to run
+#      `claude` once yourself afterwards to log in.
+#   2. Hermes Agent installed — this script does NOT install or bootstrap Hermes
+#      itself (it has its own installer, e.g. setup-hermes.sh / hermes_bootstrap.py
+#      in its repo: https://github.com/NousResearch/hermes-agent). Run that first.
+#
+# What this script does NOT install, and why:
+#   - Python: not needed separately — the plugin runs inside Hermes Agent's own
+#     already-running Python process, not as a standalone program.
+#   - tmux: unrelated to this plugin. If you use tmux to manage Claude Code CLI
+#     sessions, that's a separate personal workflow choice, not a dependency here.
 
 set -euo pipefail
 
 HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
 PLUGIN_DIR="$HERMES_HOME/plugins/model-providers/claude-cli"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CLAUDE_CODE_INSTALLER_URL="https://claude.ai/install.sh"
 
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
 ok()   { echo -e "${GREEN}✓${NC} $*"; }
@@ -22,12 +33,26 @@ warn() { echo -e "${YELLOW}⚠${NC} $*"; }
 fail() { echo -e "${RED}✗${NC} $*" >&2; exit 1; }
 
 echo "-> Preflight checks"
-command -v claude >/dev/null 2>&1 \
-    || fail "Claude Code CLI not found. Install from https://claude.ai/code first."
+if ! command -v claude >/dev/null 2>&1; then
+    warn "Claude Code CLI not found."
+    if [ -t 0 ]; then
+        read -rp "Install it now via the official installer ($CLAUDE_CODE_INSTALLER_URL)? [y/N] " reply
+    else
+        reply="n"
+    fi
+    if [[ "$reply" =~ ^[Yy]$ ]]; then
+        curl -fsSL "$CLAUDE_CODE_INSTALLER_URL" | bash
+        command -v claude >/dev/null 2>&1 \
+            || fail "Claude Code install did not complete. Install manually: https://claude.ai/code"
+        warn "Run 'claude' once to log in with your Claude Max subscription before using this plugin."
+    else
+        fail "Claude Code CLI is required. Install from https://claude.ai/code (or re-run this script and answer 'y'), then authenticate with 'claude' before continuing."
+    fi
+fi
 ok "claude CLI: $(claude --version 2>&1 | head -1 || echo present)"
 
 [ -d "$HERMES_HOME" ] \
-    || fail "Hermes Agent not found at $HERMES_HOME. Install it first (https://github.com/NousResearch/hermes-agent), or set HERMES_HOME to point at an existing install."
+    || fail "Hermes Agent not found at $HERMES_HOME. This script does not install Hermes itself — run its own installer first (https://github.com/NousResearch/hermes-agent), or set HERMES_HOME to point at an existing install."
 ok "Hermes Agent: $HERMES_HOME"
 
 echo "-> Plugin"

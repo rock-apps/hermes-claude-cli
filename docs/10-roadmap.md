@@ -4,6 +4,19 @@
 
 **Fase 1 implementada e verificada com E2E real dentro do Hermes Agent** (2026-09-18). Ver "Decisões tomadas durante a Fase 1" abaixo para como as questões abertas da Fase 0 foram resolvidas na prática — nenhuma delas bloqueou a implementação, mas ficam registradas para o usuário confirmar ou revisar. Fases 2+ continuam como plano, não executadas.
 
+## ⚠️ Requisito de versão do Hermes Agent (achado em 2026-09-18, ao instalar no ambiente real do usuário)
+
+Este plugin depende de `ProviderProfile.create_client()` + o campo `process_command` (e correlatos: `process_args`, `process_command_env_vars`, `process_args_env_var`) em `providers/base.py`. Esse mecanismo genérico **não existe em versões mais antigas do Hermes Agent** — nelas, o provider `copilot-acp` (nosso modelo de referência) é despachado por um `if` hardcoded por nome/`base_url` dentro de `agent/agent_runtime_helpers.py` (`if agent.provider == "copilot-acp" or base_url.startswith("acp://copilot")`), não por um hook genérico.
+
+Confirmado na prática: a validação E2E da Fase 1 usou um **clone fresco da `main`** (tem o mecanismo genérico, plugin funciona). Ao instalar o mesmo plugin no Hermes Agent real já instalado neste ambiente (checkout de 2026-07-17, ~37.000 commits atrás da `main`), o carregamento do plugin falhou com:
+```
+Failed to load user provider plugin claude-cli: ProviderProfile.__init__() got an unexpected keyword argument 'process_command'
+```
+
+**Isso não é um bug do plugin** — é um requisito mínimo de versão que não existia quando o projeto começou (o mecanismo genérico é relativamente novo no histórico do Hermes Agent). Diagnóstico rápido em qualquer checkout do Hermes: `grep process_command providers/base.py` (presente = compatível).
+
+**Correção**: `hermes update` (comando oficial, testado e disponível — `hermes --help` lista `update: Update Hermes Agent to the latest version`). **Não executado automaticamente** — é uma atualização grande (dezenas de milhares de commits) num ambiente pessoal já em uso ativo (sessões, cron jobs, integrações WhatsApp/Slack configuradas), decisão que cabe ao usuário, não a uma sessão automatizada.
+
 ### Validação E2E real (não só testes unitários isolados)
 
 Clone completo e real de `NousResearch/hermes-agent`, ambiente próprio (`uv sync`), `HERMES_HOME` isolado, plugin symlinkado em `plugins/model-providers/claude-cli` exatamente como o instalador original fazia — e o comando de verificação oficial deles rodado de verdade:
@@ -57,7 +70,9 @@ Trabalho real desta fase, se for adotado no futuro: usar `--output-format stream
 
 - ~~Implementar o modo de permissão decidido na Fase 0~~ — feito na Fase 1.
 - ~~Filtragem explícita do ambiente repassado ao subprocesso~~ — **feito**: `process.build_subprocess_env()` (allowlist: `HOME`, `PATH`, `LANG`/`LC_*`, `TERM`, `TMPDIR`, `USER`, `LOGNAME`, `SHELL`), chamado por `client.py` em toda invocação. **Achado crítico durante a implementação, não previsto no plano original**: `ANTHROPIC_API_KEY`, se repassada ao subprocesso, sobrescreve silenciosamente a autenticação OAuth/Max e faz o CLI tentar faturar pela API key — verificado empiricamente (com uma chave inválida de propósito: sem a correção a chamada trava; com a correção, ignora a variável e funciona via OAuth normalmente). Ver [08-seguranca.md](./08-seguranca.md). 4 novos testes (`TestBuildSubprocessEnv` em `test_process.py` + 1 em `test_client.py`), suíte total agora com 65 testes.
-- **Ainda não feito**: `--restricted` como possível default (hoje `false`, configurável via `CLAUDE_CLI_RESTRICTED`); `--max-budget-usd` sem default definido (hoje sem teto); revisão de redação de conteúdo sensível.
+- ~~Revisão de redação de conteúdo sensível~~ — **feito**: testado empiricamente que o `claude` CLI não redige segredos, e que nossa arquitetura de subprocesso não tem ponto de interceptação para fazer isso do jeito que o `copilot_acp_client.py` de referência faz (ele medeia acesso a arquivo via ACP; nós não). Decisão: não implementar raspagem de saída por enquanto (risco de falso positivo > benefício). Ver [08-seguranca.md](./08-seguranca.md).
+- **Bug real encontrado e corrigido nesta fase** (fora do escopo original, achado ao testar `--add-dir` manualmente): `--add-dir` é variádico no CLI — sem um separador `--` antes do prompt, um prompt que não começa com `-` era silenciosamente engolido como mais um diretório, e a chamada falhava com "Input must be provided...". Só se manifestava com `CLAUDE_CLI_ALLOWED_DIRS` configurado (por isso não apareceu antes). Corrigido em `build_args()` (`--` sempre antes do prompt). Testado de verdade com `CLAUDE_CLI_ALLOWED_DIRS` configurado, pós-correção — funciona. 2 novos testes de regressão, suíte agora com 67 testes.
+- **Ainda não feito**: `--restricted` como possível default (hoje `false`, configurável via `CLAUDE_CLI_RESTRICTED`); `--max-budget-usd` sem default definido (hoje sem teto). Nenhum dos dois é um bug — são só ajustes de postura de segurança ainda não decididos, não bloqueiam nada.
 
 ## Fase 4 — Sessão contínua (v2, otimização)
 
