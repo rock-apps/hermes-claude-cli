@@ -72,9 +72,22 @@ def test_load_config_uses_documented_defaults(monkeypatch) -> None:
     assert config.default_model == "sonnet"
     assert config.allowed_dirs == ()
     assert config.permission_mode == "auto"
-    assert config.restricted is False
+    assert config.restricted is True
     assert config.max_budget_usd is None
     assert config.timeout_seconds == 300.0
+
+
+def test_load_config_allows_disabling_restricted_mode(monkeypatch) -> None:
+    # Arrange
+    monkeypatch.setattr(
+        "plugin.claude_cli.config.find_claude_binary", lambda env: "/usr/bin/claude"
+    )
+
+    # Act
+    config = load_config({"CLAUDE_CLI_RESTRICTED": "false"})
+
+    # Assert
+    assert config.restricted is False
 
 
 def test_load_config_reads_every_env_var(monkeypatch, tmp_path) -> None:

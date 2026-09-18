@@ -11,6 +11,14 @@ that anything the heuristic would otherwise stop to ask about is denied instead 
 hanging forever with no human to answer. This resolves the security default that was
 left open in ../../docs/08-seguranca.md; override via ``CLAUDE_CLI_PERMISSION_MODE``
 if a different mode is needed.
+
+``CLAUDE_CLI_RESTRICTED`` defaults to true: this plugin's job is "answer a chat
+message", not "act as an agent with Bash/PowerShell/REPL/WebFetch access" — an
+unattended provider silently running shell commands as a side effect of an ordinary
+Hermes chat turn is a real risk with no upside for that use case. Verified this
+doesn't break normal chat behaviour (plain Q&A works identically restricted or not).
+Set to false explicitly for a deployment that actually wants claude-cli to act as a
+full agent with system access.
 """
 
 from __future__ import annotations
@@ -37,7 +45,7 @@ class ClaudeCLIConfig:
     default_model: str = _DEFAULT_MODEL
     allowed_dirs: tuple[str, ...] = field(default_factory=tuple)
     permission_mode: str = _DEFAULT_PERMISSION_MODE
-    restricted: bool = False
+    restricted: bool = True
     max_budget_usd: float | None = None
     timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS
 
@@ -83,8 +91,11 @@ def _parse_allowed_dirs(raw: str) -> tuple[str, ...]:
     return tuple(dirs)
 
 
-def _parse_bool(raw: str) -> bool:
-    return raw.strip().lower() in ("1", "true", "yes", "on")
+def _parse_bool(raw: str, *, default: bool) -> bool:
+    normalized = raw.strip().lower()
+    if not normalized:
+        return default
+    return normalized in ("1", "true", "yes", "on")
 
 
 def load_config(env: Mapping[str, str] | None = None) -> ClaudeCLIConfig:
@@ -102,7 +113,7 @@ def load_config(env: Mapping[str, str] | None = None) -> ClaudeCLIConfig:
         allowed_dirs=_parse_allowed_dirs(resolved_env.get("CLAUDE_CLI_ALLOWED_DIRS", "")),
         permission_mode=resolved_env.get("CLAUDE_CLI_PERMISSION_MODE", "").strip()
         or _DEFAULT_PERMISSION_MODE,
-        restricted=_parse_bool(resolved_env.get("CLAUDE_CLI_RESTRICTED", "")),
+        restricted=_parse_bool(resolved_env.get("CLAUDE_CLI_RESTRICTED", ""), default=True),
         max_budget_usd=float(max_budget_raw) if max_budget_raw else None,
         timeout_seconds=float(
             resolved_env.get("CLAUDE_CLI_TIMEOUT_SECONDS", "") or _DEFAULT_TIMEOUT_SECONDS
