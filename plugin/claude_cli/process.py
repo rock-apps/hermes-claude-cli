@@ -10,10 +10,42 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import subprocess
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
+
+# Deliberate allowlist (default-deny), not a blocklist. Verified empirically that
+# `claude` authenticates via its OAuth/Max-subscription session and runs correctly
+# with nothing more than HOME + PATH in its environment. Blocklisting instead would
+# have missed the exact failure this prevents: `ANTHROPIC_API_KEY`, if present in
+# the parent process's environment (e.g. because Hermes' own `anthropic` provider
+# needs it), was confirmed to silently take precedence over the OAuth session —
+# "another auth source is set and takes precedence over your claude.ai login" — and
+# the CLI attempted to bill against that key instead of the Max base allowance,
+# defeating the entire point of this plugin. Only HOME/PATH/locale/shell basics are
+# forwarded; every Anthropic-specific variable, valid or not, is excluded.
+_ALLOWED_ENV_VARS = ("HOME", "PATH", "LANG", "TERM", "TMPDIR", "USER", "LOGNAME", "SHELL")
+_ALLOWED_ENV_PREFIXES = ("LC_",)
+
+
+def build_subprocess_env(source: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Build a minimal, explicit environment for the `claude` subprocess.
+
+    Reads from `source` (defaults to `os.environ`) but only forwards the
+    allowlisted names above — everything else from the caller's environment,
+    including any provider API keys or tokens meant for unrelated services, is
+    dropped.
+    """
+    resolved_source = source if source is not None else os.environ
+    env: dict[str, str] = {
+        name: value
+        for name, value in resolved_source.items()
+        if name in _ALLOWED_ENV_VARS or name.startswith(_ALLOWED_ENV_PREFIXES)
+    }
+    return env
 
 
 class ClaudeCLIProcessError(RuntimeError):

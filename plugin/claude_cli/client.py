@@ -21,7 +21,13 @@ from types import SimpleNamespace
 from typing import Any
 
 from .config import ClaudeCLIConfig, load_config
-from .process import CLIResult, PermissionConfig, build_args, run_once
+from .process import (
+    CLIResult,
+    PermissionConfig,
+    build_args,
+    build_subprocess_env,
+    run_once,
+)
 from .protocol import flatten_messages, map_stop_reason, normalize_model_alias
 
 
@@ -132,6 +138,7 @@ class ClaudeCLIClient:
         result = run_once(
             config.binary,
             args,
+            env=build_subprocess_env(),
             timeout=_effective_timeout(timeout, config.timeout_seconds),
         )
         completion = _build_completion(resolved_model, result)

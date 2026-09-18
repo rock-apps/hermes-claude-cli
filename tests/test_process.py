@@ -11,6 +11,7 @@ from plugin.claude_cli.process import (
     CLIResult,
     PermissionConfig,
     build_args,
+    build_subprocess_env,
     run_once,
 )
 
@@ -315,3 +316,68 @@ class TestRunOnce:
             is_error=False,
             error_message=None,
         )
+
+
+class TestBuildSubprocessEnv:
+    def test_forwards_only_allowlisted_names(self) -> None:
+        # Arrange
+        source = {
+            "HOME": "/home/user",
+            "PATH": "/usr/bin:/bin",
+            "LANG": "en_US.UTF-8",
+            "LC_ALL": "en_US.UTF-8",
+            "TERM": "xterm",
+            "SOME_RANDOM_VAR": "should-not-leak",
+        }
+
+        # Act
+        env = build_subprocess_env(source)
+
+        # Assert
+        assert env == {
+            "HOME": "/home/user",
+            "PATH": "/usr/bin:/bin",
+            "LANG": "en_US.UTF-8",
+            "LC_ALL": "en_US.UTF-8",
+            "TERM": "xterm",
+        }
+
+    def test_never_forwards_anthropic_api_key_even_if_present(self) -> None:
+        # Arrange: confirmed empirically that ANTHROPIC_API_KEY, if forwarded,
+        # silently overrides the claude CLI's OAuth/Max-subscription session —
+        # this is the exact failure this allowlist exists to prevent.
+        source = {
+            "HOME": "/home/user",
+            "PATH": "/usr/bin",
+            "ANTHROPIC_API_KEY": "sk-ant-should-never-leak",
+            "ANTHROPIC_AUTH_TOKEN": "should-never-leak-either",
+        }
+
+        # Act
+        env = build_subprocess_env(source)
+
+        # Assert
+        assert "ANTHROPIC_API_KEY" not in env
+        assert "ANTHROPIC_AUTH_TOKEN" not in env
+
+    def test_missing_optional_vars_are_simply_absent(self) -> None:
+        # Arrange
+        source = {"HOME": "/home/user", "PATH": "/usr/bin"}
+
+        # Act
+        env = build_subprocess_env(source)
+
+        # Assert
+        assert env == {"HOME": "/home/user", "PATH": "/usr/bin"}
+
+    def test_defaults_to_os_environ_when_no_source_given(self, monkeypatch) -> None:
+        # Arrange
+        monkeypatch.setenv("HOME", "/home/from-os-environ")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "leaked-if-this-test-fails")
+
+        # Act
+        env = build_subprocess_env()
+
+        # Assert
+        assert env.get("HOME") == "/home/from-os-environ"
+        assert "ANTHROPIC_API_KEY" not in env

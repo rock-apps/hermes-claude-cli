@@ -53,11 +53,11 @@ Implementado e testado (54 testes, `pytest -q` → `54 passed`; `ruff check` lim
 
 Trabalho real desta fase, se for adotado no futuro: usar `--output-format stream-json --include-partial-messages` (schema de eventos já capturado e verificado — ver [06-referencia-cli-claude.md](./06-referencia-cli-claude.md)) e, em vez de reinventar o formato de chunk, chamar `agent.acp_openai_bridge.completion_to_stream_chunks` (ou o helper de streaming real equivalente, se o Hermes tiver um) a partir de eventos incrementais em vez de uma única `CLIResult` final — precisa investigar se esse helper aceita um iterador incremental ou só uma `completion` já pronta antes de prometer token-a-token de verdade.
 
-## Fase 3 — Hardening de segurança
+## Fase 3 — Hardening de segurança — ✅ parcialmente implementada (2026-09-18)
 
-- ~~Implementar o modo de permissão decidido na Fase 0~~ — feito na Fase 1 (ver acima). Falta: `--restricted` como possível default (hoje `false`, configurável via `CLAUDE_CLI_RESTRICTED`) e `--max-budget-usd` (já implementado e configurável via `CLAUDE_CLI_MAX_BUDGET_USD`, mas sem default definido — hoje sem teto).
-- **Ainda não feito**: filtragem explícita do ambiente repassado ao subprocesso — `run_once` hoje aceita um `env` mas `client.py` não filtra nada, então se um `env` explícito não for passado, o subprocesso herda o ambiente padrão do `subprocess.run` (que herda do processo pai por default do Python quando `env=None`). Precisa de uma decisão equivalente a `hermes_subprocess_env()` do `copilot_acp_client.py` de referência antes de considerar esta fase concluída.
-- Revisar necessidade de redação de conteúdo sensível — ainda não feito.
+- ~~Implementar o modo de permissão decidido na Fase 0~~ — feito na Fase 1.
+- ~~Filtragem explícita do ambiente repassado ao subprocesso~~ — **feito**: `process.build_subprocess_env()` (allowlist: `HOME`, `PATH`, `LANG`/`LC_*`, `TERM`, `TMPDIR`, `USER`, `LOGNAME`, `SHELL`), chamado por `client.py` em toda invocação. **Achado crítico durante a implementação, não previsto no plano original**: `ANTHROPIC_API_KEY`, se repassada ao subprocesso, sobrescreve silenciosamente a autenticação OAuth/Max e faz o CLI tentar faturar pela API key — verificado empiricamente (com uma chave inválida de propósito: sem a correção a chamada trava; com a correção, ignora a variável e funciona via OAuth normalmente). Ver [08-seguranca.md](./08-seguranca.md). 4 novos testes (`TestBuildSubprocessEnv` em `test_process.py` + 1 em `test_client.py`), suíte total agora com 65 testes.
+- **Ainda não feito**: `--restricted` como possível default (hoje `false`, configurável via `CLAUDE_CLI_RESTRICTED`); `--max-budget-usd` sem default definido (hoje sem teto); revisão de redação de conteúdo sensível.
 
 ## Fase 4 — Sessão contínua (v2, otimização)
 

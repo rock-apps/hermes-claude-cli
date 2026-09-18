@@ -289,7 +289,7 @@ def test_create_chat_completion_normalizes_httpx_style_timeout(monkeypatch) -> N
     # Arrange
     seen_timeouts: list[float] = []
 
-    def fake_run_once(binary, args, *, timeout):
+    def fake_run_once(binary, args, *, env=None, timeout=None):
         seen_timeouts.append(timeout)
         return _success_result()
 
@@ -314,3 +314,25 @@ def test_close_does_not_raise() -> None:
 
     # Act / Assert
     client.close()
+
+
+def test_create_chat_completion_forwards_a_filtered_subprocess_env(monkeypatch) -> None:
+    # Arrange: ANTHROPIC_API_KEY was confirmed to silently override the claude
+    # CLI's OAuth/Max-subscription session if forwarded — see process.py's
+    # build_subprocess_env docstring. The client must never leak it through.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-should-never-leak")
+    seen_envs: list[dict] = []
+
+    def fake_run_once(binary, args, *, env=None, timeout=None):
+        seen_envs.append(env)
+        return _success_result()
+
+    monkeypatch.setattr("plugin.claude_cli.client.run_once", fake_run_once)
+    client = ClaudeCLIClient(config=_make_config())
+
+    # Act
+    client.chat.completions.create(model="sonnet", messages=[{"role": "user", "content": "hi"}])
+
+    # Assert
+    assert seen_envs[0] is not None
+    assert "ANTHROPIC_API_KEY" not in seen_envs[0]
