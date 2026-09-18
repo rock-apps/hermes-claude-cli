@@ -1,68 +1,67 @@
-# 05 — Arquitetura unificada
+# 05 — Architecture
 
-## Diagrama de componentes (proposto)
+## Component diagram
 
 ```
 ┌───────────────────────────────────────────────────────────────────┐
-│  Hermes Agent (processo Python do usuário)                        │
+│  Hermes Agent (user's Python process)                              │
 │                                                                     │
-│   hermes model  →  seleciona provider "claude-cli"                │
+│   hermes model  →  selects the "claude-cli" provider               │
 │         │                                                          │
 │         ▼                                                          │
-│   providers.get_provider_profile("claude-cli")                    │
+│   providers.get_provider_profile("claude-cli")                     │
 │         │                                                          │
 │         ▼                                                          │
 │  ┌─────────────────────────────────────────────────────────────┐  │
-│  │  $HERMES_HOME/plugins/model-providers/claude-cli/  (symlink) │  │
-│  │       → aponta para plugin/claude_cli/ deste repositório     │  │
+│  │  $HERMES_HOME/plugins/model-providers/claude-cli/            │  │
+│  │       → symlink (dev) or installed copy (end users) of       │  │
+│  │         plugin/claude_cli/ from this repository               │  │
 │  │                                                                │
-│  │  ClaudeCLIProviderProfile(ProviderProfile)                   │  │
-│  │    auth_type = "external_process"                            │  │
+│  │  ClaudeCLIProviderProfile(ProviderProfile)                    │  │
+│  │    auth_type = "external_process"                             │  │
 │  │    create_client() → ClaudeCLIClient(**kwargs)                │  │
 │  │                                                                │
-│  │  ClaudeCLIClient                                              │  │
-│  │    .chat.completions.create(model, messages, stream, ...)    │  │
+│  │  ClaudeCLIClient  (one instance per Hermes conversation)      │  │
+│  │    .chat.completions.create(model, messages, stream, ...)     │  │
 │  │      │                                                        │  │
-│  │      ├─ protocol.py   → traduz messages OpenAI ⇄ prompt/flags│  │
-│  │      ├─ session.py    → (v2) mapeia sessão Hermes ⇄ session-id│ │
-│  │      └─ process.py    → subprocess.Popen(["claude", ...])    │  │
+│  │      ├─ protocol.py  → OpenAI messages ⇄ prompt/flags         │  │
+│  │      ├─ session.py   → decides if this turn can --resume      │  │
+│  │      └─ process.py   → subprocess.run(["claude", ...])        │  │
 │  └───────────────────────┬───────────────────────────────────────┘  │
 └──────────────────────────┼───────────────────────────────────────┘
-                            │ stdio (argv + stdin/stdout, sem rede)
+                            │ stdio (argv + stdin/stdout, no network)
                             ▼
-                    `claude` CLI (binário da Anthropic)
+                    `claude` CLI (Anthropic's binary)
                             │ OAuth (~/.claude/.credentials.json)
                             ▼
-                 Assinatura Claude Max (base plan allowance)
+                 Claude Max subscription (base plan allowance)
 ```
 
-Comparar com a arquitetura original (2 repositórios): ver diagrama equivalente em [01](./01-analise-claude-bridge.md) — lá existia um salto de rede (`HTTP :9180`) e um processo systemd adicional que desaparecem aqui.
+Compare with the original two-repository design: see the equivalent diagram in [01](./01-analise-claude-bridge.md) — that one had a network hop (`HTTP :9180`) and a systemd process, both absent here.
 
-## Layout de módulos proposto (dentro deste repositório)
+## Module layout (`plugin/claude_cli/`)
 
 ```
-plugin/
-└── claude_cli/                     # pacote Python, plugin do Hermes
-    ├── plugin.yaml                 # manifesto (name, kind: model-provider, version, description, author)
-    ├── __init__.py                 # registra ClaudeCLIProviderProfile via register_provider()
-    ├── client.py                   # ClaudeCLIClient — implementa create_client()
-    ├── protocol.py                 # tradução de mensagens OpenAI ⇄ prompt/flags do CLI
-    ├── process.py                  # spawn/gestão do subprocesso `claude`, parsing de stream-json
-    ├── config.py                   # leitura de variáveis de ambiente (ver docs/07)
-    └── models.py                   # catálogo estático de aliases/modelos suportados
+plugin/claude_cli/
+├── plugin.yaml    # manifest (name, kind: model-provider, version, description, author)
+├── __init__.py    # registers ClaudeCLIProviderProfile via register_provider()
+├── client.py      # ClaudeCLIClient — implements create_client(), orchestrates a turn
+├── protocol.py     # pure functions: OpenAI messages ⇄ prompt/flags translation
+├── process.py      # subprocess spawn/parse, subprocess env allowlist
+├── session.py       # pure logic: can this turn safely --resume the last one?
+├── config.py        # environment variable resolution (see docs/07)
+└── models.py         # static model alias/catalog
 ```
 
-Cada módulo tem uma responsabilidade única (alinhado à regra "many small files > few large files"): `client.py` não sabe como formatar prompts, `protocol.py` não sabe invocar subprocesso, `process.py` não sabe nada sobre o formato OpenAI.
+Each module has one responsibility: `client.py` doesn't know how to build CLI argv, `protocol.py` doesn't know how to spawn a subprocess, `process.py` doesn't know the OpenAI message shape, `session.py` has no I/O at all (pure functions, easy to unit test).
 
-## Responsabilidades por módulo
+## Responsibilities, module by module
 
 ### `__init__.py`
-Equivalente ao `__init__.py` do repositório original, mas com `auth_type="external_process"` em vez de `env_vars` fake e `base_url` HTTP:
 
 ```python
 class ClaudeCLIProviderProfile(ProviderProfile):
     def create_client(self, **client_kwargs):
-        from .client import ClaudeCLIClient
         return ClaudeCLIClient(**client_kwargs)
 
 claude_cli = ClaudeCLIProviderProfile(
@@ -70,54 +69,48 @@ claude_cli = ClaudeCLIProviderProfile(
     aliases=("claude", "claude-code", "claude-max", "claude-subscription"),
     display_name="Claude CLI (Max subscription)",
     auth_type="external_process",
-    base_url="process://claude-cli",       # URL simbólica, nunca usada para rede
+    base_url="process://claude-cli",       # symbolic, never used for real networking
     process_command="claude",
-    process_command_env_vars=("CLAUDE_CLI_BIN",),
-    fallback_models=("sonnet", "opus", "haiku", "claude-sonnet-4-6", "claude-opus-4-7", "claude-haiku-4-5"),
-    default_aux_model="haiku",
-    supports_model_listing=False,           # não há endpoint /models — usa fallback_models
+    process_command_env_vars=("CLAUDE_CLI_BIN", "CLAUDE_BIN"),
+    fallback_models=FALLBACK_MODELS,        # from models.py
+    default_aux_model=DEFAULT_AUX_MODEL,
+    supports_model_listing=False,           # no /models endpoint — uses fallback_models
 )
 register_provider(claude_cli)
 ```
 
+The `providers`/`providers.base` imports are guarded with `try/except ImportError`, so this module is a safe no-op outside a real Hermes process (e.g. this project's own test suite).
+
 ### `client.py` — `ClaudeCLIClient`
-Espelha a superfície mínima do `CopilotACPClient` (ver [03](./03-modelo-de-provider-do-hermes.md)):
+
+Mirrors `CopilotACPClient`'s minimal surface (see [03](./03-modelo-de-provider-do-hermes.md)):
 - `.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create_chat_completion))`
-- `HERMES_SKIP_TRANSPORT_WRAP = True` (evita reencapsulamento pela camada HTTP genérica do Hermes)
-- `_create_chat_completion(model, messages, stream, tools, ...)` decide entre subprocesso "one-shot" (v1) ou sessão resumível (v2, ver abaixo).
+- `HERMES_SKIP_TRANSPORT_WRAP = True` — tells Hermes not to re-wrap this client in its generic HTTP transport.
+- `close()` is a no-op (Hermes calls it unconditionally on cleanup; each call here is already self-contained).
+- `_effective_timeout()` normalizes Hermes' `timeout` argument, which can be either a bare float or an `httpx.Timeout`-like object (`.read`/`.write`/`.connect`/`.pool`) — confirmed empirically against a real Hermes process, not assumed.
+- `_run_turn()` is where session continuity (Fase 4, see [10-roadmap.md](./10-roadmap.md)) lives: it asks `session.compute_delta()` whether the current call can safely `--resume` the previous one tracked on `self`, falls back to a full call with the whole flattened history whenever that's not possible or the resume itself fails, and updates the tracked state after every successful call.
+- When `stream=True`, the full completion is built first (there's no real incremental delivery — see the streaming note below), then converted via Hermes' own `agent.acp_openai_bridge.completion_to_stream_chunks()` helper — the same one `copilot-acp` uses, imported lazily (only resolvable inside a real Hermes process).
 
 ### `protocol.py`
-Reimplementa (em Python, corrigindo os bugs achados em [01](./01-analise-claude-bridge.md)) a lógica de `flattenMessages`/`stringifyContent`/`mapStopReason` do `claude-bridge` original — mas alimentando de fato `--output-format json` ou `stream-json`, para que custo e uso de tokens **realmente** venham do CLI em vez de ficarem zerados.
+
+Pure translation functions, no I/O: `flatten_messages()` (system prompt + transcript + current message, ported and corrected from `claude-bridge`'s Go `flattenMessages`/`stringifyContent` — see [01](./01-analise-claude-bridge.md) for the bug this fixes), `normalize_model_alias()` (collapses a full model ID to a bare alias when it matches `sonnet`/`opus`/`haiku`), `map_stop_reason()` (`claude`'s `stop_reason` → an OpenAI `finish_reason`).
 
 ### `process.py`
-Gerencia o `subprocess.run`, incluindo:
-- Modo `json` (uma chamada, resposta completa) — implementado na Fase 1 (`build_args`/`run_once`), com parsing real do JSON de saída verificado empiricamente contra o CLI de verdade.
-- Timeout por chamada (o `claude-bridge` original usa 5 minutos fixos — mantido como default configurável).
-- Ambiente do subprocesso: nunca herdar variáveis sensíveis do processo pai além do necessário (mesma preocupação que `hermes_subprocess_env()` resolve no `copilot_acp_client.py` de referência) — **ainda não implementado**, ver [10-roadmap.md](./10-roadmap.md) Fase 3.
 
-> **Nota (pós-Fase 1):** o modo `stream-json`/`--include-partial-messages` descrito abaixo em "v2" **não** foi implementado como um parser incremental dedicado. Ver a seção "Fase 2" em [10-roadmap.md](./10-roadmap.md) para o porquê — o próprio cliente de referência do Hermes (`copilot_acp_client.py`) também não faz streaming token-a-token real para um provider de subprocesso; `client.py` monta a resposta completa e a expõe como um "stream" de um único chunk quando `stream=True`.
+`build_args()` builds the CLI argv (always ends with `-- <prompt>`, a deliberate separator — `--add-dir` is variadic and would otherwise swallow a prompt that doesn't start with `-`, see [08-seguranca.md](./08-seguranca.md)). `run_once()` runs `claude` via `subprocess.run(..., check=False)` and always tries `json.loads()` on stdout first, regardless of exit code — the CLI reports its own API-level errors (bad model, etc.) inside a well-formed JSON payload with `is_error: true`, not via a non-JSON crash. `build_subprocess_env()` is the allowlist described in [08-seguranca.md](./08-seguranca.md).
 
-## Duas fases de invocação (v1 vs v2)
+### `session.py`
 
-### v1 — paridade funcional, sem estado entre turnos
-Cada chamada de `.create()`:
-1. Achata `messages` num prompt único (system prompt via `--append-system-prompt`, transcript anterior + última mensagem do usuário).
-2. Roda `claude -p --output-format json --model <alias> [flags de permissão]`.
-3. Faz parse do JSON de saída real (`result`, `stop_reason`, `session_id`, `total_cost_usd`, `usage.{input,output}_tokens`) — **isso já corrige o bug do bridge original**, que nunca fazia esse parse.
+`compute_delta(previous_messages, current_messages)` — pure function, no subprocess/I/O. Returns the messages appended since the last tracked call, or `None` when continuity can't be trusted (history rewritten/compacted, shorter than before, or nothing tracked yet). `client.py` uses `None` as the signal to fall back to a normal full-history call.
 
-### v2 — sessão contínua (otimização, não obrigatória para paridade)
-Usa `--session-id <uuid>` na primeira chamada de uma conversa Hermes e `--resume <uuid>` nas seguintes, evitando reenviar o histórico inteiro a cada turno. Requer mapear `id da conversa/sessão do Hermes` → `session_id do claude CLI`, com uma política de expiração. Ver [10-roadmap.md](./10-roadmap.md) — não faz parte do escopo inicial porque adiciona estado que precisa ser testado com cuidado (o que acontece se a sessão do `claude` expirar, for compactada, etc.).
+## Streaming: what's actually implemented
 
-## Por que não existe mais `scripts/reload.sh`/systemd
+`stream=True` does not deliver real token-by-token output. Investigating this while implementing revealed that even Hermes' own bundled reference client, `copilot_acp_client.py`, doesn't do incremental streaming for a subprocess-based provider either — it builds the full response first and converts it to stream chunks via the shared `agent.acp_openai_bridge.completion_to_stream_chunks()` helper. This plugin does the same. Real `--output-format stream-json --include-partial-messages` support (the CLI does support it — see [06](./06-referencia-cli-claude.md)) is tracked as Fase 2 in [10-roadmap.md](./10-roadmap.md), not implemented, and not clearly worth it given even the reference implementation doesn't bother.
 
-Não há processo de longa duração para reiniciar. O "processo" agora é o subprocesso `claude`, criado e destruído a cada chamada (ou por sessão, em v2), dentro do ciclo de vida do próprio Hermes. Isso elimina uma classe inteira de problemas operacionais (processo zumbi, porta ocupada, reinício após crash) que o `claude-bridge` original precisava resolver com `scripts/reload.sh` (kill → build → start → poll health).
+## No `scripts/reload.sh` / systemd equivalent, and why
 
-## Instalação (visão de alto nível, detalhes em roadmap)
+There's no long-running process to restart. The `claude` "process" is spawned and destroyed per call (or reused across a resumed session's lifetime — still no persistent process, just a resumable id), inside Hermes' own process lifecycle. That removes a whole category of operational problems (zombie processes, port conflicts, restart-after-crash) that the original bridge needed `scripts/reload.sh` (kill → build → start → poll health) to manage.
 
-Diferente do original (clonar 2 repos + `go build` + systemd), a instalação vira:
+## Install paths
 
-1. Clonar/ter este repositório disponível localmente.
-2. Symlink de `plugin/claude_cli/` → `$HERMES_HOME/plugins/model-providers/claude-cli` (igual ao mecanismo original, só que sem repositório separado para o "bridge").
-3. Nenhum build, nenhum binário adicional, nenhuma unit systemd.
-
-Distribuição via `pip` + entry point (`hermes_agent.plugins`) fica registrada como evolução opcional em [10](./10-roadmap.md).
+Two, documented in the top-level README: `hermes plugins install rock-apps/hermes-claude-cli/plugin/claude_cli --enable` (one command, no manual clone — recommended for using the plugin) and clone + `scripts/install.sh` (symlinks `plugin/claude_cli/`, recommended for developing it, since local edits apply immediately). No build step, no additional binary, no systemd unit in either case.

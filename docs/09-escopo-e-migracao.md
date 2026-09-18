@@ -1,36 +1,35 @@
-# 09 — Escopo e migração
+# 09 — Scope and migration
 
-Resumo consolidado do que entra e do que fica de fora, com justificativa. Detalhes de cada item nos documentos [01](./01-analise-claude-bridge.md) e [02](./02-analise-hermes-claude-cli-original.md).
+What was kept vs. dropped from the two third-party projects this plugin replaces, and why. Details in [01](./01-analise-claude-bridge.md) and [02](./02-analise-hermes-claude-cli-original.md).
 
-## Dentro do escopo (herdado, com correções)
+## Kept (with fixes)
 
-| Funcionalidade | Origem | Mudança em relação ao original |
+| Feature | Origin | Change |
 |---|---|---|
-| Provider `claude-cli` no picker do Hermes (`hermes model`) | `hermes-claude-cli` original | Mesmo conceito; `auth_type="external_process"` em vez de `base_url` HTTP + variável de ambiente falsa. |
-| Aliases amigáveis (`claude`, `claude-code`, `claude-max`, `claude-subscription`) | `hermes-claude-cli` original | Mantidos como estão. |
-| Catálogo de modelos (`sonnet`/`opus`/`haiku` + IDs versionados) | ambos | Mantido; precisa de manutenção manual contínua conforme a Anthropic libera novos modelos — mesma dívida operacional que já existia. |
-| Normalização de alias por substring (`sonnet`/`opus`/`haiku`) | `claude-bridge` | Portado para `protocol.py`. |
-| Diretórios de leitura configuráveis (`--add-dir`) | `claude-bridge` | Mantido o conceito; removida a lista fixa de diretórios pessoais hardcoded (ver [07](./07-configuracao.md)). |
-| Mapeamento `stop_reason` → `finish_reason` | `claude-bridge` | Portado como está (`end_turn`→`stop`, `max_tokens`→`length`, `tool_use`→`tool_calls`). |
-| `default_aux_model="haiku"` | `hermes-claude-cli` original | Mantido. |
-| Cost/usage accounting | `claude-bridge` (anunciado, mas quebrado) | **Corrigido de fato** — passa a usar `--output-format json`/`stream-json` para extrair `total_cost_usd`/`usage` reais do CLI, em vez de campos sempre zerados. |
+| `claude-cli` provider in the Hermes picker (`hermes model`) | original `hermes-claude-cli` | Same concept; `auth_type="external_process"` instead of an HTTP `base_url` + fake env var. |
+| Friendly aliases (`claude`, `claude-code`, `claude-max`, `claude-subscription`) | original `hermes-claude-cli` | Kept as-is. |
+| Model catalog (`sonnet`/`opus`/`haiku` + versioned IDs) | both | Kept; needs the same ongoing manual maintenance any Hermes provider requires as Anthropic ships new models. |
+| Substring-based model alias normalization | `claude-bridge` | Ported into `protocol.py`. |
+| Configurable read directories (`--add-dir`) | `claude-bridge` | Concept kept; the hardcoded personal-directory list was dropped (see [07](./07-configuracao.md)). |
+| `stop_reason` → `finish_reason` mapping | `claude-bridge` | Ported as-is. |
+| `default_aux_model="haiku"` | original `hermes-claude-cli` | Kept. |
+| Cost/usage accounting | `claude-bridge` (advertised, but broken) | Actually fixed — real `total_cost_usd`/`usage` are parsed from `--output-format json`, not hardcoded to zero. |
 
-## Fora do escopo (não será replicado)
+## Out of scope (not replicated)
 
-| Item | Origem | Justificativa |
+| Item | Origin | Why |
 |---|---|---|
-| Servidor HTTP dedicado (`cmd/claude-bridge/main.go`) | `claude-bridge` | Substituído por `create_client()`/subprocesso direto — ver [04](./04-decisao-bridge-e-necessario.md). |
-| `cmd/model-router/main.go` (roteador Anthropic Messages → DeepSeek/z.ai) | `claude-bridge` | Resolve um problema diferente (trocar o backend de modelo do **próprio Claude Code**, não integrar Claude ao Hermes). Não documentado no README, não referenciado pelo plugin Hermes, veio de um commit "Backup local project state". Scope creep — se a Rock Apps quiser essa funcionalidade (usar DeepSeek/GLM dentro do Claude Code), é um **projeto separado**, não parte deste plugin. |
-| `cmd/zai-proxy/main.go` (proxy Anthropic Messages → z.ai) | `claude-bridge` | Mesma justificativa do item acima. |
-| Binários versionados (`model-router`, `zai-proxy`, `zai-proxy.bak`, `bin/model-router`, `claude-bridge.pid`) | `claude-bridge` | Erro de higiene de repositório (artefatos de build e PID file não deveriam estar no git). `.gitignore` deste projeto previne isso desde o início. |
-| Unidade systemd para o bridge | ambos | Não há mais processo de longa duração a gerenciar. |
-| Clonagem de um segundo repositório durante a instalação | `hermes-claude-cli` original (`install.sh`) | Tudo vive em um único repositório agora. |
-| `CLAUDE_BRIDGE_URL` como "credencial falsa" para o picker | `hermes-claude-cli` original | `auth_type="external_process"` resolve isso de forma nativa e correta. |
-| Suporte a consumidores externos ao Hermes (Open WebUI, LibreChat, Cursor) via o mesmo endpoint HTTP | `claude-bridge` | Fora do escopo declarado pelo usuário ("será um plugin utilizado no hermes"). Registrado como possível modo opcional futuro em [05](./05-arquitetura-unificada.md) e [10](./10-roadmap.md), não como requisito atual. |
-| `claude-agent-sdk` (pacote oficial da Anthropic no PyPI, usado por projetos como [`RichardAtCT/claude-code-openai-wrapper`](https://github.com/RichardAtCT/claude-code-openai-wrapper)) como base do `process.py` em vez de `subprocess`+parsing manual do JSON do CLI | avaliado, não adotado | O SDK é assíncrono (`async for` em `query()`) e não bate com o padrão síncrono que o `CopilotACPClient` de referência usa (subprocesso bloqueante) — adotá-lo exigiria ponte assíncrona dentro de `create_client()`, mais uma dependência externa, sem ganho real: já validamos empiricamente o schema JSON real de `claude -p --output-format json` (ver [06](./06-referencia-cli-claude.md)) e ele é simples de parsear com a stdlib. O wrapper citado resolve o mesmo problema que o `claude-bridge` (expõe HTTP), só que com o SDK por baixo em vez de parsing manual — não muda a decisão de [04](./04-decisao-bridge-e-necessario.md) de não precisar de servidor HTTP aqui. Vale reconsiderar o SDK só se um dia quisermos continuidade de sessão nativa (`--resume` gerenciado pelo SDK) em vez do subprocess-por-chamada — ver Fase 4 do [roadmap](./10-roadmap.md). |
+| Dedicated HTTP server (`cmd/claude-bridge/main.go`) | `claude-bridge` | Replaced by `create_client()`/direct subprocess — see [04](./04-decisao-bridge-e-necessario.md). |
+| `model-router` / `zai-proxy` binaries (routing the Claude Code CLI itself to DeepSeek/z.ai) | `claude-bridge` | Solves a different problem (swapping *Claude Code's own* model backend, not integrating Claude into Hermes). Undocumented, unreferenced by the Hermes plugin, introduced via a stray "backup" commit. Scope creep — if this capability is ever wanted, it's a separate project. |
+| Committed binaries/PID files | `claude-bridge` | Repo-hygiene mistake in the original; this project's `.gitignore` prevents it from the start. |
+| systemd unit for the bridge | both | No long-running process to manage anymore. |
+| Cloning a second repository during install | original `hermes-claude-cli` | Everything lives in one repository now. |
+| `CLAUDE_BRIDGE_URL` as a fake credential for the provider picker | original `hermes-claude-cli` | `auth_type="external_process"` solves this natively. |
+| Serving non-Hermes HTTP clients (Open WebUI, LibreChat, Cursor) | `claude-bridge` | Out of scope for a Hermes-only plugin. Tracked as an optional, undemanded Fase 6 in [10-roadmap.md](./10-roadmap.md). |
+| `claude-agent-sdk` (Anthropic's official PyPI package, used by projects like [`RichardAtCT/claude-code-openai-wrapper`](https://github.com/RichardAtCT/claude-code-openai-wrapper)) as the basis for `process.py` | evaluated, not adopted | The SDK is async (`async for` in `query()`), which doesn't fit the synchronous pattern the reference `CopilotACPClient` uses (blocking subprocess) — adopting it would need an async bridge inside `create_client()` plus an extra dependency, for no real gain: the real `claude -p --output-format json` schema (see [06](./06-referencia-cli-claude.md)) is simple enough to parse with the stdlib alone. The cited wrapper solves the same problem as `claude-bridge` (exposes HTTP), just with the SDK instead of manual parsing — it doesn't change the decision in [04](./04-decisao-bridge-e-necessario.md). Session continuity (Fase 4) ended up implemented directly via `--session-id`/`--resume` without needing the SDK. |
 
-## Limitações que persistem (não são resolvidas por nenhuma escolha de arquitetura)
+## Persistent limitations (not solved by any architecture choice)
 
-- **Sem passthrough de `tools:` externos** — limitação do próprio `claude` CLI, não do transporte (ver [06](./06-referencia-cli-claude.md)).
-- **Overhead de subprocesso por chamada (~1–3s)** — inerente ao `claude` CLI, presente tanto na arquitetura antiga quanto na nova.
-- **Sem protocolo ACP nativo no `claude` CLI** — a integração via subprocesso precisa de um parser próprio para o formato de saída do `claude -p`, não pode reaproveitar o parser ACP que o Hermes já tem para o Copilot.
+- **No passthrough for external `tools:` definitions** — a limitation of the `claude` CLI itself, not the transport (see [06](./06-referencia-cli-claude.md)).
+- **Per-call subprocess overhead (~1–3s)** — inherent to the `claude` CLI, present in both the old and new architecture.
+- **No native ACP protocol in the `claude` CLI** — the subprocess integration needs its own parser for `claude -p`'s output shape; it can't reuse the ACP parser Hermes already has for Copilot.

@@ -1,55 +1,49 @@
 # CLAUDE.md — hermes-claude-cli
 
-Instruções de projeto para sessões do Claude Code trabalhando neste repositório. Leia isto antes de tocar em código.
+Project instructions for Claude Code sessions working in this repository. Read this before touching code.
 
-## O que é este projeto
+## What this project is
 
-Plugin de provider de modelo para o **[Hermes Agent](https://github.com/NousResearch/hermes-agent)** (Nous Research) que expõe o CLI oficial `claude` (Claude Code) autenticado via **assinatura Claude Max** como um provider de primeira classe (`hermes model` → "Claude CLI (Max subscription)").
+A model provider plugin for **[Hermes Agent](https://github.com/NousResearch/hermes-agent)** (Nous Research) that exposes the official `claude` CLI (Claude Code), authenticated with a **Claude Max subscription**, as a first-class provider (`hermes model` → "Claude CLI (Max subscription)").
 
-Este repositório **substitui e unifica** dois repositórios de terceiros:
-- [`niski84/claude-bridge`](https://github.com/niski84/claude-bridge) (servidor HTTP Go)
-- [`niski84/hermes-claude-cli`](https://github.com/niski84/hermes-claude-cli) (plugin Python que dependia do bridge acima)
+This repository **replaces and unifies** two third-party repositories:
+- [`niski84/claude-bridge`](https://github.com/niski84/claude-bridge) (Go HTTP server)
+- [`niski84/hermes-claude-cli`](https://github.com/niski84/hermes-claude-cli) (Python plugin that depended on the bridge above)
 
-**Toda a análise que fundamenta as decisões abaixo está em [`docs/`](./docs/README.md). Leia `docs/README.md` primeiro para saber qual documento consultar.**
+**The analysis behind the decisions below lives in [`docs/`](./docs/README.md). Read `docs/README.md` first to find the right document.**
 
-## Status atual
+## Status
 
-**Fase 1 implementada e testada** (2026-09-18): `plugin/claude_cli/{protocol,process,config,client,models,__init__}.py` funcionam de ponta a ponta contra o `claude` CLI real (smoke test manual confirmado — resposta correta, `usage`/custo reais, multi-turno, caminho de erro sem crash). 54 testes automatizados (`pytest`, nenhum chama o CLI real), `ruff check` limpo. Ambiente de dev: `.venv/` local via `uv` (`python3 -m venv` não funciona neste sistema — falta `python3-venv`).
+Implemented and validated end-to-end, including against a real, previously-installed Hermes Agent instance (post-`hermes update`) and via `hermes plugins install`. 81 automated tests (`pytest`, none call the real CLI), `ruff check` clean. Dev environment: local `.venv/` via `uv` (`python3 -m venv` doesn't work on this system — missing `python3-venv`).
 
-Ver `docs/10-roadmap.md` (seção "Status" no topo) para o que exatamente foi feito e o que continua pendente (Fases 2–5). Código em inglês (comentários, docstrings, identificadores); esta documentação e a comunicação com o usuário continuam em português.
-
-Rodar os testes:
 ```
 cd /mnt/dev/projects-rk/hermes-claude-cli
 .venv/bin/python -m pytest -q
 ```
 
-## Decisão arquitetural central (não reabrir sem justificativa nova)
+See `docs/10-roadmap.md` for the full phase-by-phase history and what's still open (real token-by-token streaming — deliberately not built; see below).
 
-**Este plugin NÃO usa um servidor HTTP.** A tentação óbvia (replicar o `claude-bridge` como um servidor HTTP embutido) foi avaliada e rejeitada em [`docs/04-decisao-bridge-e-necessario.md`](./docs/04-decisao-bridge-e-necessario.md). Em vez disso, usa o mecanismo nativo do Hermes Agent para providers cujo protocolo não é HTTP:
+## Core architectural decision (don't reopen without new evidence)
+
+**This plugin does not run an HTTP server.** The obvious approach — replicating `claude-bridge` as an embedded HTTP server — was evaluated and rejected in [`docs/04-decisao-bridge-e-necessario.md`](./docs/04-decisao-bridge-e-necessario.md). Instead it uses Hermes Agent's native mechanism for non-HTTP providers:
 
 - `ProviderProfile(auth_type="external_process", process_command="claude", ...)`
-- `ProviderProfile.create_client()` sobrescrito para devolver um cliente customizado que fala com o `claude` CLI via subprocesso/stdio — **sem socket, sem porta**.
-- Padrão de referência real, em produção no próprio Hermes Agent: `plugins/model-providers/copilot-acp/` + `agent/copilot_acp_client.py` (documentado em `docs/03-modelo-de-provider-do-hermes.md`).
+- `ProviderProfile.create_client()` overridden to return a custom client that talks to the `claude` CLI over subprocess/stdio — **no socket, no port**.
+- Same pattern as Hermes Agent's own bundled reference provider: `plugins/model-providers/copilot-acp/` + `agent/copilot_acp_client.py` (see `docs/03-modelo-de-provider-do-hermes.md`).
 
-Se uma sessão futura considerar "adicionar de volta um servidor HTTP", ela deve primeiro ler `docs/04-decisao-bridge-e-necessario.md` e `docs/09-escopo-e-migracao.md` — só há um cenário registrado onde isso faria sentido (reuso por ferramentas fora do Hermes), e está marcado como Fase 6 opcional, não padrão.
+If a future session considers "adding an HTTP server back", read `docs/04-decisao-bridge-e-necessario.md` and `docs/09-escopo-e-migracao.md` first — there's exactly one documented scenario where that would make sense (reuse by non-Hermes tools), tracked as an optional, undemanded Fase 6.
 
-## Convenções do projeto
+## Project conventions
 
-- **Um único repositório, uma única linguagem (Python).** Não introduzir Go, binários compilados, ou dependência de toolchains externas — era exatamente a complexidade que este projeto elimina.
-- **Sem processos de longa duração.** O `claude` CLI é invocado como subprocesso por chamada (v1) ou por sessão (v2, ver roadmap) — nunca como daemon systemd.
-- **Módulos pequenos e de responsabilidade única** dentro de `plugin/claude_cli/` (`client.py`, `protocol.py`, `process.py`, `config.py`, `models.py`) — ver layout completo em `docs/05-arquitetura-unificada.md`.
-- **`.gitignore` estrito**: nunca versionar binários, arquivos `.pid`, ou artefatos de build. O repositório `claude-bridge` original cometeu esse erro (ver `docs/01-analise-claude-bridge.md`) — não repetir.
-- **TDD** para qualquer lógica de tradução de mensagens (`protocol.py`) — escrever teste primeiro, seguindo o padrão AAA (Arrange-Act-Assert) das regras globais do usuário.
-- **Não assumir modo de permissão permissivo por padrão.** A escolha entre `--dangerously-skip-permissions` (como o original) e um modo mais restritivo (`--permission-mode` + `--restricted`) é uma decisão em aberto documentada em `docs/08-seguranca.md` — não implementar um default sem revisitar esse documento.
+- **One repository, one language (Python).** No Go, no compiled binaries, no external toolchain dependency — that's the exact complexity this project removes.
+- **No long-running processes.** The `claude` CLI is invoked as a subprocess per call, optionally reused across turns via `--resume` for session continuity (see `plugin/claude_cli/session.py`) — never as a systemd daemon.
+- **Small, single-responsibility modules** under `plugin/claude_cli/` (`client.py`, `protocol.py`, `process.py`, `config.py`, `models.py`, `session.py`) — full layout in `docs/05-arquitetura-unificada.md`.
+- **Strict `.gitignore`**: never commit binaries, `.pid` files, or build artifacts. The original `claude-bridge` repo made that mistake (`docs/01-analise-claude-bridge.md`) — don't repeat it.
+- **TDD** for message-translation logic (`protocol.py`) — write the test first, AAA pattern (Arrange-Act-Assert).
+- **The subprocess environment is allowlisted, not blocklisted** (`process.build_subprocess_env`) — only `HOME`, `PATH`, `LANG`/`LC_*`, `TERM`, `TMPDIR`, `USER`, `LOGNAME`, `SHELL` are forwarded. This isn't incidental: `ANTHROPIC_API_KEY`, if forwarded, silently overrides the CLI's OAuth/Max-subscription session and makes it bill against that key instead — confirmed empirically. Don't loosen this without re-reading `docs/08-seguranca.md`.
+- **`CLAUDE_CLI_RESTRICTED` defaults to `true`** (`--restricted`, no Bash/PowerShell/REPL/WebFetch) and **`CLAUDE_CLI_PERMISSION_MODE` defaults to `auto`** + `--permission-prompts none` — this plugin answers chat messages, it doesn't act as an unattended agent with system access. Both are deliberate, validated defaults, not placeholders.
 
-## Antes de implementar qualquer coisa
+## External references used during the original analysis (verify before reusing)
 
-1. Ler `docs/00-visao-geral.md` (premissas assumidas — em especial, que "Hermes" = Hermes Agent da Nous Research, não um produto interno).
-2. Ler `docs/10-roadmap.md` — a Fase 0 lista decisões que precisam de validação do usuário antes de codar (nome final do pacote, licença, default de permissão).
-3. Seguir a ordem de fases do roadmap — não pular para streaming (Fase 2) ou sessão contínua (Fase 4) antes de ter a Fase 1 (paridade funcional básica) testada.
-
-## Referências externas usadas na análise (não copiar/colar sem verificar a versão)
-
-- Código-fonte do Hermes Agent (`providers/base.py`, `providers/__init__.py`, `plugins/model-providers/copilot-acp/`, `agent/copilot_acp_client.py`) — analisado via clone raso em `github.com/NousResearch/hermes-agent`. Se uma sessão futura precisar reconsultar, os arquivos podem ter mudado desde então; reclonar e comparar antes de assumir que a API (`create_client`, `auth_type="external_process"`) continua idêntica.
-- `claude --help` da versão **2.1.276** do Claude Code — flags relevantes documentadas em `docs/06-referencia-cli-claude.md`. Revalidar se a versão instalada mudar.
+- Hermes Agent source (`providers/base.py`, `providers/__init__.py`, `plugins/model-providers/copilot-acp/`, `agent/copilot_acp_client.py`, `agent/agent_runtime_helpers.py`) — read from a clone of `github.com/NousResearch/hermes-agent`. This is an extremely fast-moving monorepo (tens of thousands of commits between two clones taken hours apart during this project's own development); reclone and diff before assuming an API (`create_client`, `auth_type="external_process"`, `process_command`) is still shaped the same way. Older Hermes installs may lack this mechanism entirely — see `docs/10-roadmap.md` for the exact incompatibility and fix (`hermes update`).
+- `claude --help` output — flags documented in `docs/06-referencia-cli-claude.md`. Revalidate if the installed CLI version changes.

@@ -1,34 +1,33 @@
-# 00 — Visão geral
+# 00 — Overview
 
-## Objetivo
+## What this project is
 
-Consolidar em **um único projeto/plugin**, hospedado neste repositório (`rock-apps/hermes-claude-cli`), a funcionalidade hoje espalhada em dois repositórios públicos de terceiros:
+A single Hermes Agent plugin (this repository, `rock-apps/hermes-claude-cli`) that lets the Claude CLI (Claude Code), authenticated with a **Claude Max subscription**, act as a first-class model provider inside [Hermes Agent](https://github.com/NousResearch/hermes-agent) — without an HTTP bridge.
 
-- [`niski84/claude-bridge`](https://github.com/niski84/claude-bridge) — servidor HTTP em Go que expõe uma API compatível com OpenAI (`/v1/chat/completions`) na frente e roda o CLI oficial `claude` como subprocesso atrás.
-- [`niski84/hermes-claude-cli`](https://github.com/niski84/hermes-claude-cli) — plugin Python para o [Hermes Agent](https://github.com/NousResearch/hermes-agent) que registra um provider `claude-cli` apontando para o `claude-bridge` acima.
+It replaces two third-party repositories that solved the same problem differently:
 
-Objetivo final do usuário original de ambos os repos: usar a assinatura **Claude Max** (via `claude` CLI autenticado) como um provider de modelo de primeira classe dentro do Hermes Agent, evitando cobrança por "extra usage" que ocorre quando se acessa a API da Anthropic via chave de API/OAuth de terceiros.
+- [`niski84/claude-bridge`](https://github.com/niski84/claude-bridge) — a Go HTTP server exposing an OpenAI-compatible API (`/v1/chat/completions`) that shells out to the `claude` CLI behind it.
+- [`niski84/hermes-claude-cli`](https://github.com/niski84/hermes-claude-cli) — a Python Hermes plugin registering a `claude-cli` provider that pointed at the `claude-bridge` above.
 
-## Pergunta central feita pelo usuário
+Goal shared with both: use a Claude Max subscription (via the authenticated `claude` CLI) as a first-class model provider in Hermes, avoiding the "extra usage" billing that direct API-key/OAuth access triggers.
 
-> "De repente esse bridge não é preciso. Ou é. Analise."
+## The question that shaped the architecture
 
-Resposta curta (detalhada no [ADR 04](./04-decisao-bridge-e-necessario.md)): **a função** do bridge (traduzir um protocolo HTTP compatível com OpenAI para uma chamada do CLI `claude`) **é necessária**, porque o Hermes exige que todo provider fale HTTP. Mas a **implementação atual** do bridge — um binário Go separado, em outro repositório, rodando como serviço systemd, escutando em uma porta TCP sem autenticação — **não é necessária**. O Hermes Agent já tem um mecanismo oficial e testado em produção (`ProviderProfile.create_client()` + `auth_type="external_process"`) desenhado exatamente para "providers que não falam HTTP" — usado hoje pelo provider bundled `copilot-acp`. Isso permite embutir toda a lógica de tradução dentro do próprio plugin Python, como um subprocesso local via stdio, **sem nenhum servidor HTTP, porta ou processo systemd separado**.
+> "What if that bridge isn't actually necessary? Analyze it."
 
-## Premissas assumidas (a validar com o usuário)
+Short answer (full reasoning in [ADR 04](./04-decisao-bridge-e-necessario.md)): the bridge's **function** — translating an OpenAI-compatible HTTP call into a `claude` CLI invocation — is necessary, because that's the only way to talk to a CLI tool. But the bridge's **implementation** in both third-party projects — a separate Go binary, in a separate repository, running as a systemd service, listening on an unauthenticated TCP port — is not. Hermes Agent already ships an extension point built for exactly this case: `ProviderProfile.create_client()` + `auth_type="external_process"`, the same mechanism its bundled `copilot-acp` provider uses. That lets the whole translation layer live inside this Python plugin as a local subprocess over stdio — no HTTP server, port, or systemd unit anywhere.
 
-1. **"Hermes" = [Hermes Agent](https://github.com/NousResearch/hermes-agent) (Nous Research)**, o mesmo framework referenciado nos dois repositórios analisados. Não foi encontrado nenhum produto interno da Rock Apps chamado "Hermes" (organização GitHub `rock-apps` não tem outro repositório com esse nome; memória de projeto não tem registro anterior). Se "Hermes" se referir a outra coisa, esta análise e a arquitetura proposta precisam ser revistas.
-2. Este repositório (`rock-apps/hermes-claude-cli`) será o **plugin único e definitivo**, substituindo a necessidade de manter/clonar `niski84/claude-bridge` e `niski84/hermes-claude-cli` separadamente.
-3. O ambiente-alvo tem o **Claude Code CLI (`claude`)** instalado e autenticado via assinatura Max (mesmo pré-requisito dos projetos originais).
-4. Licença, nome definitivo do pacote Python e estratégia de distribuição (diretório symlinkado vs. pacote `pip` com entry point) ficam como decisões abertas — ver [09](./09-escopo-e-migracao.md) e [10](./10-roadmap.md).
+That's what got built, tested (81 passing tests), and validated end-to-end against a real Hermes Agent installation — see [10-roadmap.md](./10-roadmap.md) for the full record.
 
-## Metodologia desta análise
+## Facts this project depends on
 
-Não foi feita apenas leitura de README. Para responder com segurança à pergunta central, foram lidos:
+1. **"Hermes" is [Hermes Agent](https://github.com/NousResearch/hermes-agent) (Nous Research)** — confirmed, not assumed: the plugin is built against its real `providers` API and has been run successfully inside a live Hermes Agent process, including the maintainer's own personal installation.
+2. This repository is the single, definitive plugin — no dependency on cloning or maintaining `niski84/claude-bridge` or `niski84/hermes-claude-cli`.
+3. The target environment has the **Claude Code CLI (`claude`)** installed and authenticated with a Max subscription — same prerequisite the third-party projects had.
+4. The repository's software license is the one thing still undecided; everything else (package name, install method, permission defaults) was resolved during implementation — see [10-roadmap.md](./10-roadmap.md).
 
-- Todo o código-fonte Go dos dois binários "escondidos" (não documentados) dentro de `claude-bridge`: `model-router` e `zai-proxy`.
-- O histórico de commits de ambos os repositórios (`git log`), que revelou um commit "Backup local project state" contendo artefatos que não deveriam estar versionados.
-- O código-fonte real do Hermes Agent (`NousResearch/hermes-agent`, via clone parcial/sparse-checkout): `providers/base.py`, `providers/__init__.py`, `plugins/model-providers/copilot-acp/__init__.py`, `agent/copilot_acp_client.py` e a documentação oficial `website/docs/developer-guide/adding-providers.md`.
-- O `--help` completo do CLI `claude` instalado localmente (v2.1.276), para levantar capacidades (streaming real, resume de sessão, modos de permissão) não usadas pela implementação original.
+## How this was researched
 
-Essa terceira fonte (o próprio Hermes Agent) é o que torna esta análise "profunda": os dois repositórios de terceiros não mencionam a existência do mecanismo `auth_type="external_process"`, porque foi construído para outro provider (Copilot) depois — ou paralelamente — à criação do `claude-bridge`.
+Beyond reading READMEs: the full Go source of `claude-bridge` (including two undocumented binaries buried in a "backup" commit, `model-router` and `zai-proxy` — unrelated to this project, see [09](./09-escopo-e-migracao.md)); both repos' commit histories; the real Hermes Agent source (`providers/base.py`, `providers/__init__.py`, the bundled `copilot-acp` provider and its `agent/copilot_acp_client.py` client, and its official `adding-providers.md` developer doc); and the full `claude --help` output to find CLI capabilities (real streaming, session resume, permission modes) the original bridge never used.
+
+That last source is what made the difference: neither third-party repo mentions `auth_type="external_process"`, because it was likely added to Hermes Agent for the Copilot provider around the same time or after `claude-bridge` was written.

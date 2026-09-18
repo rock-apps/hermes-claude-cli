@@ -1,28 +1,28 @@
-# 07 — Configuração
+# 07 — Configuration
 
-Superfície de variáveis de ambiente do plugin, implementada em `plugin/claude_cli/config.py`. Nomes prefixados com `CLAUDE_CLI_` para não colidir com variáveis já usadas pelo próprio `claude` CLI (`CLAUDE_BIN` era o nome usado pelo bridge original — mantido como fallback).
+Environment-variable surface for the plugin, implemented in `plugin/claude_cli/config.py`. Names are prefixed `CLAUDE_CLI_` to avoid colliding with variables the `claude` CLI itself already uses (`CLAUDE_BIN` was the original bridge's name — kept as a fallback).
 
-| Variável | Default real (implementado) | Propósito |
+| Variable | Actual default (implemented) | Purpose |
 |---|---|---|
-| `CLAUDE_CLI_BIN` | auto-detecção (`CLAUDE_BIN` → `~/.local/bin/claude` → `/usr/local/bin/claude` → `PATH`) | Caminho do binário `claude`. |
-| `CLAUDE_CLI_DEFAULT_MODEL` | `sonnet` | Alias/modelo padrão quando o Hermes não especifica. |
-| `CLAUDE_CLI_ALLOWED_DIRS` | (vazio) | Lista separada por `:` de diretórios extras liberados via `--add-dir`. Sem defaults "mágicos" de um usuário específico (diferente do bridge original). |
-| `CLAUDE_CLI_PERMISSION_MODE` | `auto` | Mapeia para `--permission-mode`. Sempre combinado com `--permission-prompts none` (não configurável) — decisão tomada na Fase 1, ver [08-seguranca.md](./08-seguranca.md). |
-| `CLAUDE_CLI_RESTRICTED` | `true` | Se `true` (default), adiciona `--restricted` (remove Bash/PowerShell/REPL/WebFetch). Decisão tomada na Fase 3: o caso de uso é "responder uma mensagem de chat", não "agir como agente com acesso ao sistema" — ver [08-seguranca.md](./08-seguranca.md). Setar `false` explicitamente para um deployment que quer o `claude-cli` como agente completo. |
-| `CLAUDE_CLI_MAX_BUDGET_USD` | (vazio = sem limite) | Mapeia para `--max-budget-usd`, teto de gasto por chamada. |
-| `CLAUDE_CLI_TIMEOUT_SECONDS` | `300` (paridade com os 5 min do bridge original) | Timeout do subprocesso por chamada. |
-| `CLAUDE_CLI_SESSION_CONTINUITY` | `true` | Se `true` (default), reaproveita a sessão do `claude` CLI entre turnos via `--resume` em vez de reenviar o histórico completo sempre — ver Fase 4 em [10-roadmap.md](./10-roadmap.md). Qualquer falha do resume cai automaticamente para uma chamada nova com histórico completo. Setar `false` para desativar totalmente. |
+| `CLAUDE_CLI_BIN` | auto-detected (`CLAUDE_BIN` → `~/.local/bin/claude` → `/usr/local/bin/claude` → `PATH`) | Path to the `claude` binary. |
+| `CLAUDE_CLI_DEFAULT_MODEL` | `sonnet` | Default alias/model when Hermes doesn't specify one. |
+| `CLAUDE_CLI_ALLOWED_DIRS` | (empty) | `:`-separated list of extra directories granted via `--add-dir`. No "magic" defaults tied to a specific user (unlike the original bridge). |
+| `CLAUDE_CLI_PERMISSION_MODE` | `auto` | Maps to `--permission-mode`. Always paired with `--permission-prompts none` (not configurable) — see [08-seguranca.md](./08-seguranca.md). |
+| `CLAUDE_CLI_RESTRICTED` | `true` | When true (default), adds `--restricted` (drops Bash/PowerShell/REPL/WebFetch). This plugin answers chat messages — it isn't meant to act as an agent with system access. Set `false` for a deployment that wants `claude-cli` to behave as a full agent — see [08-seguranca.md](./08-seguranca.md). |
+| `CLAUDE_CLI_MAX_BUDGET_USD` | (empty = no limit) | Maps to `--max-budget-usd`, a per-call spend cap. |
+| `CLAUDE_CLI_TIMEOUT_SECONDS` | `300` (parity with the original bridge's 5-minute timeout) | Subprocess timeout per call. |
+| `CLAUDE_CLI_SESSION_CONTINUITY` | `true` | When true (default), reuses the `claude` CLI session across turns via `--resume` instead of always resending the full history — see Fase 4 in [10-roadmap.md](./10-roadmap.md). Any resume failure falls back automatically to a fresh call with full history. Set `false` to disable entirely. |
 
-Não existe `CLAUDE_CLI_STREAM_MODE` (estava no plano original, nunca implementado): streaming não usa um modo dedicado — ver a nota sobre `stream=True` em [05-arquitetura-unificada.md](./05-arquitetura-unificada.md) e a Fase 2 em [10-roadmap.md](./10-roadmap.md).
+There is no `CLAUDE_CLI_STREAM_MODE` (it was in the original plan, never implemented) — streaming doesn't use a dedicated mode; see the `stream=True` note in [05-arquitetura-unificada.md](./05-arquitetura-unificada.md) and Fase 2 in [10-roadmap.md](./10-roadmap.md).
 
-## Removidas em relação ao original (e por quê)
+## Removed relative to the original bridge (and why)
 
-| Variável original | Motivo da remoção |
+| Original variable | Why it's gone |
 |---|---|
-| `PORT` | Não existe mais servidor HTTP (ver [04](./04-decisao-bridge-e-necessario.md)). |
-| `CLAUDE_BYPASS_PERMISSIONS` | Substituída por `CLAUDE_CLI_PERMISSION_MODE`, que expõe os modos reais do CLI em vez de um binário ligado/desligado só para `--dangerously-skip-permissions`. |
-| `CLAUDE_BRIDGE_URL` (do plugin Hermes original) | Era um hack para o picker do Hermes reconhecer o provider como "configurado". Com `auth_type="external_process"`, essa necessidade desaparece — ver [03](./03-modelo-de-provider-do-hermes.md). |
+| `PORT` | No HTTP server anymore (see [04](./04-decisao-bridge-e-necessario.md)). |
+| `CLAUDE_BYPASS_PERMISSIONS` | Replaced by `CLAUDE_CLI_PERMISSION_MODE`, which exposes the CLI's real modes instead of an on/off switch for `--dangerously-skip-permissions`. |
+| `CLAUDE_BRIDGE_URL` (from the original Hermes plugin) | Was a hack to make Hermes' provider picker treat the provider as "configured". `auth_type="external_process"` removes that need — see [03](./03-modelo-de-provider-do-hermes.md). |
 
-## Ambiente do subprocesso (não é uma variável `CLAUDE_CLI_*`, mas afeta o que o `claude` CLI vê)
+## Subprocess environment (not a `CLAUDE_CLI_*` variable, but affects what the `claude` CLI sees)
 
-Não configurável pelo usuário, por design: `process.build_subprocess_env()` só repassa `HOME`, `PATH`, `LANG`/`LC_*`, `TERM`, `TMPDIR`, `USER`, `LOGNAME`, `SHELL` ao subprocesso — tudo mais do ambiente do Hermes (incluindo `ANTHROPIC_API_KEY` de outros providers) é descartado. Ver [08-seguranca.md](./08-seguranca.md) para o porquê (achado crítico: `ANTHROPIC_API_KEY` vazada sobrescreve a autenticação Max).
+Not user-configurable, by design: `process.build_subprocess_env()` only forwards `HOME`, `PATH`, `LANG`/`LC_*`, `TERM`, `TMPDIR`, `USER`, `LOGNAME`, `SHELL` to the subprocess — everything else from Hermes' environment (including `ANTHROPIC_API_KEY` from other providers) is dropped. See [08-seguranca.md](./08-seguranca.md) for why: a leaked `ANTHROPIC_API_KEY` silently overrides Max-subscription auth.

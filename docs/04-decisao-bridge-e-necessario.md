@@ -1,63 +1,61 @@
-# 04 — ADR: o `claude-bridge` é necessário?
+# 04 — ADR: is the `claude-bridge` necessary?
 
-**Status**: aceito (decisão de arquitetura para este projeto).
+**Status**: accepted and implemented.
 
-## Contexto
+## Context
 
-O usuário pediu explicitamente: *"de repente esse bridge não é preciso. ou é. analise."* Esta é a pergunta que orienta toda a arquitetura proposta em [05](./05-arquitetura-unificada.md).
+The maintainer asked: *"what if that bridge isn't actually necessary? Analyze it."* — the question that shaped this project's architecture.
 
-## Pergunta desmembrada em duas partes
+## The question, split in two
 
-### Parte 1 — A *função* do bridge é necessária?
+### Part 1 — is the bridge's *function* necessary?
 
-**Sim.** O `claude` CLI não expõe nenhuma API HTTP; ele é invocado via linha de comando com stdin/stdout/argv. O Hermes Agent, por outro lado, modela **todo** provider de modelo como algo que fala um `api_mode` de rede (`chat_completions`, `anthropic_messages` ou `codex_responses`) — ver [03](./03-modelo-de-provider-do-hermes.md). Não existe, no Hermes, um "provider genérico sem protocolo" — mesmo o caso mais próximo disso (`copilot-acp`) ainda se anuncia como `api_mode="chat_completions"` e implementa uma classe de cliente que expõe a interface `.chat.completions.create()`.
+**Yes.** The `claude` CLI exposes no HTTP API; it's invoked via command line with stdin/stdout/argv. Hermes Agent, meanwhile, models every model provider as something that speaks a network `api_mode` (`chat_completions`, `anthropic_messages`, or `codex_responses`) — see [03](./03-modelo-de-provider-do-hermes.md). There's no "protocol-less generic provider" in Hermes — even the closest case (`copilot-acp`) still advertises `api_mode="chat_completions"` and implements a client class exposing `.chat.completions.create()`.
 
-Conclusão: **alguma camada de tradução entre "chamada de provider do Hermes" e "invocação do CLI `claude`" é obrigatória.** Não há como eliminar essa responsabilidade.
+Conclusion: some translation layer between "a Hermes provider call" and "a `claude` CLI invocation" is mandatory. That responsibility can't be eliminated.
 
-### Parte 2 — A *implementação atual* (servidor HTTP Go, repositório separado, systemd) é necessária?
+### Part 2 — is the *original implementation* (Go HTTP server, separate repository, systemd) necessary?
 
-**Não.** Ela é uma escolha de implementação, não um requisito do Hermes. O Hermes já expõe um mecanismo de extensão de primeira classe, testado em produção pela própria Nous Research, desenhado exatamente para "provider cujo protocolo não é HTTP":
+**No.** That's an implementation choice, not a Hermes requirement. Hermes already ships a first-class extension point, used in production by Nous Research itself, built for exactly "a provider whose protocol isn't HTTP":
 
 ```python
 class ProviderProfile:
-    auth_type: str = "api_key"  # ... ou "external_process"
+    auth_type: str = "api_key"  # ... or "external_process"
     def create_client(self, **client_kwargs) -> Any | None:
-        """Retorna um cliente customizado. None = usa o cliente OpenAI HTTP padrão."""
+        """Return a custom client. None = use the standard OpenAI HTTP client."""
 ```
 
-Isso é usado hoje pelo provider bundled `copilot-acp`, que fala com o binário `copilot` via subprocesso + stdio (protocolo ACP/JSON-RPC), **sem nenhum servidor HTTP, porta ou processo systemd**.
+The bundled `copilot-acp` provider uses exactly this today, talking to the `copilot` binary over subprocess + stdio (the ACP/JSON-RPC protocol) — no HTTP server, port, or systemd process anywhere.
 
-## Decisão
+## Decision
 
-A arquitetura unificada **não terá um servidor HTTP separado**. Em vez disso:
+This plugin runs no separate HTTP server. Instead:
 
-1. O plugin registra um `ProviderProfile` com `auth_type="external_process"` (mesmo padrão do `copilot-acp`).
-2. `create_client()` devolve uma classe própria, ex. `ClaudeCLIClient`, que expõe `.chat.completions.create(...)`.
-3. Internamente, `ClaudeCLIClient` invoca `claude -p --output-format stream-json ...` como subprocesso **dentro do próprio processo Python do Hermes** — sem socket, sem porta, sem processo daemon separado.
-4. A tradução de mensagens OpenAI ⇄ prompt/flags do `claude` CLI (o que hoje vive em `main.go` do `claude-bridge`) migra para um módulo Python dentro deste mesmo plugin.
+1. It registers a `ProviderProfile` with `auth_type="external_process"` — the same pattern `copilot-acp` uses.
+2. `create_client()` returns `ClaudeCLIClient`, exposing `.chat.completions.create(...)`.
+3. Internally, `ClaudeCLIClient` invokes `claude -p --output-format json ...` as a subprocess **inside Hermes' own Python process** — no socket, no port, no separate daemon.
+4. Message translation between OpenAI-shaped messages and `claude` CLI prompt/flags (what used to live in `claude-bridge`'s `main.go`) lives in this plugin's `protocol.py`.
 
-## Consequências
+## Consequences
 
-### Positivas
+### Positive
 
-- **Elimina a superfície de ataque de rede inteira.** Não existe mais "porta 9180 sem autenticação escutando em `0.0.0.0`" (risco real identificado em [01](./01-analise-claude-bridge.md)) — porque não existe porta nenhuma.
-- **Um repositório, uma linguagem.** Não há mais Go + Python + 2 repositórios git + clone em tempo de instalação + toolchain extra. Todo o plugin é Python, no mesmo processo que o Hermes já roda.
-- **Sem processo systemd adicional para manter vivo, reiniciar, ou monitorar.** O subprocesso `claude` vive e morre com cada chamada (ou com a sessão, se optarmos por reuso — ver [05](./05-arquitetura-unificada.md)), gerenciado pelo próprio ciclo de vida do Hermes.
-- **Acesso a funcionalidades do CLI que o bridge HTTP não usava**: streaming real (`stream-json` + `--include-partial-messages`), resume de sessão (`--session-id`/`--resume`), modos de permissão mais granulares que "bypass total" (ver [06](./06-referencia-cli-claude.md) e [08](./08-seguranca.md)).
-- **Instalação mais simples**: sem `go build`, sem clonar um segundo repositório, sem editar unit systemd.
+- **Removes the entire network attack surface.** There's no more "unauthenticated port 9180 listening on `0.0.0.0`" (a real risk in the original — see [01](./01-analise-claude-bridge.md)) — because there's no port at all.
+- **One repository, one language.** No more Go + Python, two git repositories, a clone-at-install-time step, or an extra toolchain. The whole plugin is Python, in the same process Hermes already runs.
+- **No extra systemd process to keep alive, restart, or monitor.** The `claude` subprocess lives and dies with each call (or with a resumed session, see Fase 4 in [10-roadmap.md](./10-roadmap.md)), managed entirely by Hermes' own process lifecycle.
+- **Access to CLI capabilities the HTTP bridge never used**: real cost/usage accounting via `--output-format json`, session resume via `--resume`, and permission modes more granular than "bypass everything" — see [06](./06-referencia-cli-claude.md) and [08](./08-seguranca.md).
+- **Simpler install.** No `go build`, no cloning a second repository, no systemd unit to edit.
 
-### Negativas / trade-offs a monitorar
+### Trade-offs
 
-- Perdemos a possibilidade de expor o "bridge" para **outras ferramentas fora do Hermes** (o README do `claude-bridge` cita Open WebUI, LibreChat, Cursor como consumidores adicionais do endpoint HTTP). Se a Rock Apps também quiser essa reutilização multi-cliente, um modo HTTP "opcional" pode ser mantido como funcionalidade **separada e explicitamente opt-in** (ver alternativa abaixo), não como padrão do plugin do Hermes.
-- O subprocesso ainda tem overhead de inicialização (~1–3s por chamada), igual ao bridge original — isso é uma limitação do `claude` CLI em si, não do transporte.
-- Dependemos de uma API interna do Hermes (`ProviderProfile.create_client`, `auth_type="external_process"`) que, embora documentada e usada em produção, pode mudar entre versões do Hermes Agent — precisa de teste de compatibilidade ao atualizar a dependência (ver [10](./10-roadmap.md)).
+- The bridge could be reused by tools outside Hermes (the original README listed Open WebUI, LibreChat, and Cursor as consumers of its HTTP endpoint). This plugin doesn't support that; if it's ever needed, it belongs as a separate, explicitly opt-in mode — see Fase 6 in [10-roadmap.md](./10-roadmap.md), not built preemptively.
+- The subprocess still has per-call startup overhead (~1–3s), same as the original bridge — a `claude` CLI limitation, not a transport one.
+- This plugin depends on a Hermes-internal API (`ProviderProfile.create_client`, `auth_type="external_process"`) that, while documented and used in production, is part of an extremely fast-moving codebase and can change between Hermes versions — see [10-roadmap.md](./10-roadmap.md) for a real compatibility gap this surfaced (an older, previously-installed Hermes Agent version lacked this mechanism entirely).
 
-## Alternativa considerada e rejeitada (para v1)
+## Alternative considered and rejected
 
-**Manter um servidor HTTP, mas embutido no mesmo processo/pacote** (ex.: um `http.server` Python rodando em thread, iniciado por um hook de lifecycle do plugin) em vez de subprocesso puro. Rejeitada para v1 porque:
+**Keep an HTTP server, but embed it in the same process** (e.g. a Python `http.server` on a background thread, started by a plugin lifecycle hook) instead of a plain subprocess. Rejected because:
 
-- Hermes não oferece um hook de "on plugin load, start background service" documentado — teríamos que inferir/hackear esse comportamento.
-- Ainda herdaria o problema de "porta local sem necessidade" mesmo que resolvesse "dois repositórios".
-- O padrão `external_process` é estritamente melhor quando o único consumidor é o Hermes.
-
-Fica registrada como opção de **modo dual** futuro (flag de configuração `CLAUDE_CLI_TRANSPORT=subprocess|http`) caso apareça um requisito real de reuso fora do Hermes — ver [10](./10-roadmap.md).
+- Hermes has no documented "on plugin load, start a background service" hook to build that on.
+- It would still carry the "unnecessary local port" problem, even if it solved "two repositories."
+- The `external_process` pattern is strictly better when Hermes is the only consumer, which is the case here.

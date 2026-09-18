@@ -2,121 +2,74 @@
 
 ## Status
 
-**Fase 1 implementada e verificada com E2E real dentro do Hermes Agent** (2026-09-18). Ver "Decisões tomadas durante a Fase 1" abaixo para como as questões abertas da Fase 0 foram resolvidas na prática — nenhuma delas bloqueou a implementação, mas ficam registradas para o usuário confirmar ou revisar. Fases 2+ continuam como plano, não executadas.
+Implemented and validated end-to-end: Fases 1, 3, 4, and 5 are done. Fase 2 was deliberately skipped (see below). 81 tests passing, `ruff` clean.
 
-## ⚠️ Requisito de versão do Hermes Agent (achado em 2026-09-18, ao instalar no ambiente real do usuário)
+## Minimum Hermes Agent version
 
-Este plugin depende de `ProviderProfile.create_client()` + o campo `process_command` (e correlatos: `process_args`, `process_command_env_vars`, `process_args_env_var`) em `providers/base.py`. Esse mecanismo genérico **não existe em versões mais antigas do Hermes Agent** — nelas, o provider `copilot-acp` (nosso modelo de referência) é despachado por um `if` hardcoded por nome/`base_url` dentro de `agent/agent_runtime_helpers.py` (`if agent.provider == "copilot-acp" or base_url.startswith("acp://copilot")`), não por um hook genérico.
+This plugin needs `ProviderProfile.create_client()` plus the `process_command`/`process_args`/`process_command_env_vars`/`process_args_env_var` fields in `providers/base.py`. Older Hermes Agent checkouts don't have this generic mechanism — they dispatch `copilot-acp` (the reference provider) via a hardcoded name/`base_url` check in `agent/agent_runtime_helpers.py` instead of a hook. Symptom on an incompatible version:
 
-Confirmado na prática: a validação E2E da Fase 1 usou um **clone fresco da `main`** (tem o mecanismo genérico, plugin funciona). Ao instalar o mesmo plugin no Hermes Agent real já instalado neste ambiente (checkout de 2026-07-17, ~37.000 commits atrás da `main`), o carregamento do plugin falhou com:
 ```
 Failed to load user provider plugin claude-cli: ProviderProfile.__init__() got an unexpected keyword argument 'process_command'
 ```
 
-**Isso não é um bug do plugin** — é um requisito mínimo de versão que não existia quando o projeto começou (o mecanismo genérico é relativamente novo no histórico do Hermes Agent). Diagnóstico rápido em qualquer checkout do Hermes: `grep process_command providers/base.py` (presente = compatível).
+Quick check in any Hermes checkout: `grep process_command providers/base.py` (present = compatible). Fix: `hermes update`. This is a genuine version-compatibility gap this project surfaced, not a plugin bug — this is an extremely fast-moving monorepo (tens of thousands of commits can separate two clones taken hours apart).
 
-**Correção**: `hermes update` (comando oficial). **Executado com autorização explícita do usuário** em 2026-09-18, no `~/.hermes` real dele. Resultado:
+`hermes update` was run against the maintainer's own real, previously-installed Hermes Agent (with authorization) and pulled ~37,000 commits. It surfaced two issues unrelated to this plugin, left for the maintainer to resolve on their own schedule: an uncommitted local change to `hermes_cli/web_server.py` that conflicted on merge and is preserved unapplied in `git stash@{0}` (`cd ~/.hermes/hermes-agent && git stash show -p stash@{0}` to review), and an `npm` version mismatch that breaks only the Hermes dashboard/TUI build (core CLI unaffected). The plugin itself was confirmed working end-to-end post-update.
 
-- Código atualizado com sucesso (`37254` novos commits puxados, HEAD agora em `aee7de4db5`).
-- **Aviso real, não relacionado a este plugin, que o usuário precisa resolver**: havia uma alteração local não commitada em `hermes_cli/web_server.py` no checkout do usuário antes do update. O `hermes update` faz auto-stash antes de puxar e tenta reaplicar depois — a reaplicação teve conflito e foi abortada; a mudança local ficou **preservada, mas não aplicada** em `git stash@{0}` ("hermes-update-autostash-20260918-175356"), com um arquivo `hermes_cli/web_server.py.orig` deixado para trás do merge abortado. Não mexemos nisso — é uma customização própria do usuário no core do Hermes, não algo deste projeto. Para revisar: `cd ~/.hermes/hermes-agent && git stash show -p stash@{0}`.
-- **Aviso real, ambiental, não relacionado a este plugin**: a atualização de dependências Node.js falhou (`npm error notsup` — a versão do `npm` instalada, 11.12.1, não satisfaz o range exigido pelo hermes-agent, `<11.10.0 || >=11.17.0`). Isso afeta só o dashboard/web UI/TUI do Hermes — não afeta o `hermes` CLI de chat nem o provider `claude-cli` (confirmado, ver abaixo).
-- **Descoberta nova, não documentada antes**: nesta versão atualizada, plugins "portáveis" (com `plugin.yaml`, como o nosso) **instalam desabilitados por padrão** — um gate de segurança do próprio Hermes que não existia na versão que a validação E2E da Fase 1 usou horas antes (mais um sintoma de quão rápido esse repositório muda). Precisa de `hermes plugins enable claude-cli-provider` explicitamente. **`scripts/install.sh` atualizado** para rodar isso automaticamente (silenciosamente vira no-op em versões mais antigas sem esse gate).
-- **Confirmado funcionando de ponta a ponta no Hermes real do usuário, pós-update, pós-enable**: `hermes -z "..." --provider claude-cli -m sonnet` respondeu corretamente.
+Also discovered post-update: recent Hermes versions install "portable" plugins (ones with a `plugin.yaml`, like this one) disabled by default as a security gate. `scripts/install.sh` now runs `hermes plugins enable claude-cli-provider` automatically (a no-op on older Hermes versions without that gate).
 
-### Validação E2E real (não só testes unitários isolados)
+## Real end-to-end validation
 
-Clone completo e real de `NousResearch/hermes-agent`, ambiente próprio (`uv sync`), `HERMES_HOME` isolado, plugin symlinkado em `plugins/model-providers/claude-cli` exatamente como o instalador original fazia — e o comando de verificação oficial deles rodado de verdade:
+Beyond the 81 unit tests (which never call the real `claude` CLI), this plugin was validated against real, live Hermes Agent processes multiple times: a fresh `main` clone in an isolated sandbox, the maintainer's own personal Hermes install (before and after `hermes update`), and via `hermes plugins install` from the published repository. Example, from a fresh clone:
 
 ```
 $ python -m hermes_cli.main -z "What is the capital of Portugal? One word." --provider claude-cli -m sonnet
 Lisboa
 ```
 
-Isso prova que o mecanismo de descoberta de provider do Hermes de verdade encontra nosso plugin e roteia uma chamada real através dele — não só que nosso `ClaudeCLIClient` funciona quando chamado diretamente pelos nossos próprios testes.
+That proves Hermes' real provider-discovery mechanism finds this plugin and routes a real call through it — not just that `ClaudeCLIClient` works when called directly by this project's own tests.
 
-**Dois bugs reais encontrados e corrigidos** — só apareceram porque o Hermes chama o client do jeito que ele chama de verdade, não do jeito que nós supúnhamos:
+Two real bugs only surfaced this way (Hermes calls the client differently than assumed):
 
-1. **Timeout**: o Hermes passa `timeout` como um objeto tipo `httpx.Timeout` (tem `.read`/`.write`/`.connect`/`.pool`), não como `float`. Isso quebrava `subprocess.run(timeout=...)`. Corrigido com `_effective_timeout()` em `client.py` (mesma solução que o `copilot_acp_client.py` de referência usa para o mesmo problema).
-2. **Streaming**: o relay interno do Hermes sempre chama em modo streaming e espera `.choices[i].delta`, não `.choices[i].message`. Corrigido usando o mesmo helper que o `copilot-acp` de referência usa: `agent.acp_openai_bridge.completion_to_stream_chunks(completion)`.
+1. **Timeout type**: Hermes passes `timeout` as an `httpx.Timeout`-like object (`.read`/`.write`/`.connect`/`.pool`), not a bare `float` — broke `subprocess.run(timeout=...)`. Fixed with `_effective_timeout()` in `client.py` (same fix shape as the reference `copilot_acp_client.py`).
+2. **Streaming shape**: Hermes' internal relay always calls in streaming mode and expects chunks with `.choices[i].delta`, not a full `.choices[i].message`. Fixed by reusing the same helper the reference `copilot-acp` client uses: `agent.acp_openai_bridge.completion_to_stream_chunks(completion)`.
 
-Também foi adicionado um `close()` no-op em `ClaudeCLIClient` (o Hermes chama `close()` incondicionalmente no cleanup de todo client de provider).
+A no-op `close()` was also added (Hermes calls it unconditionally during provider-client cleanup).
 
-Suíte de testes ampliada para cobrir os dois casos (60 testes agora, incluindo um módulo `agent.acp_openai_bridge` falso injetado via `sys.modules` para testar a conversão de streaming sem precisar de um checkout real do Hermes). `pytest -q` → `60 passed`, `ruff check` limpo.
+## What shipped, by phase
 
-## Fase 0 — Decisões que estavam abertas antes de codar
+**Fase 0 (pre-implementation decisions)** — all resolved except the repository license (still no `LICENSE` file, undecided).
 
-1. ~~Confirmar a premissa de "Hermes" = Hermes Agent (NousResearch)~~ — mantida como estava assumida; a implementação depende disso (`from providers import register_provider`), então se estiver errada, `plugin/claude_cli/__init__.py` precisa mudar.
-2. ~~Escolher o default de `CLAUDE_CLI_PERMISSION_MODE`~~ — **resolvido**: default `"auto"` (o modo de auto-aprovação nativo do próprio Claude Code, o mesmo sob o qual esta sessão de desenvolvimento rodou), sempre combinado com `--permission-prompts none` (nada que pediria confirmação humana trava — é negado, já que não há humano para responder num provider headless). Ver `plugin/claude_cli/config.py` e [08-seguranca.md](./08-seguranca.md). Ajustável via `CLAUDE_CLI_PERMISSION_MODE`.
-3. Nome final do pacote/plugin — mantido `claude-cli` (paridade com o original). Não revisitado.
-4. Licença do repositório — **ainda não decidido**, nenhum arquivo `LICENSE` foi criado. Continua em aberto.
+**Fase 1 — functional provider parity.** `plugin/claude_cli/{protocol,process,config,client,models,__init__}.py`. Real `--output-format json` parsing (`total_cost_usd`/`usage`/`session_id`/`is_error`) — fixes the original bridge's bug of those fields always being zero. CLI JSON schema verified empirically against a real installed `claude` CLI (v2.1.276), not assumed.
 
-## Fase 1 — Provider mínimo funcional (paridade v1) — ✅ implementada
+**Fase 2 — real token streaming: deliberately not built.** Investigating Hermes' own reference client (`agent/copilot_acp_client.py`, used by the bundled `copilot-acp` provider) showed that even Nous Research's official subprocess-based provider doesn't do real incremental streaming — it builds the full response and converts it to chunks via a shared Hermes helper. This plugin does the same (`stream=True` returns a single-chunk `iter([completion])`). Real work for this phase, if ever revisited: `--output-format stream-json --include-partial-messages` (event schema already captured in [06](./06-referencia-cli-claude.md)) feeding incremental events into a streaming version of that same conversion helper — would need confirming the helper can accept incremental input rather than only a finished completion.
 
-Implementado e testado (54 testes, `pytest -q` → `54 passed`; `ruff check` limpo):
+**Fase 3 — security hardening.**
+- Permission mode and `--restricted` defaults resolved (see [08-seguranca.md](./08-seguranca.md)).
+- Subprocess environment allowlist (`process.build_subprocess_env()`): only `HOME`, `PATH`, `LANG`/`LC_*`, `TERM`, `TMPDIR`, `USER`, `LOGNAME`, `SHELL` pass through. Found in the process: a leaked `ANTHROPIC_API_KEY` silently overrides OAuth/Max auth and makes the CLI try to bill against that key instead — confirmed empirically, this is why the filter is an allowlist rather than a blocklist.
+- Sensitive-content redaction: evaluated and deliberately not implemented — see [08-seguranca.md](./08-seguranca.md) for why.
+- Real bug found and fixed: `--add-dir` is a variadic CLI flag; without a `--` separator, a prompt not starting with `-` was silently swallowed as one more directory whenever `CLAUDE_CLI_ALLOWED_DIRS` was set, failing with "Input must be provided...". Fixed by always inserting `--` before the prompt.
+- Open: no default cap for `--max-budget-usd` (unset = unlimited) — a posture choice, not a bug.
 
-- `plugin/claude_cli/protocol.py` — achatamento de mensagens, normalização de alias de modelo, mapeamento de `stop_reason` (23 testes).
-- `plugin/claude_cli/process.py` — `build_args`/`run_once` via `--output-format json`, com parsing real de `total_cost_usd`/`usage`/`session_id`/`is_error` (corrige o bug descrito em [01](./01-analise-claude-bridge.md)) — schema verificado empiricamente contra o `claude` CLI real instalado (v2.1.276), não assumido (14 testes, subprocess real fake, nunca chama o CLI de verdade nos testes).
-- `plugin/claude_cli/config.py` — leitura de variáveis de ambiente conforme [07-configuracao.md](./07-configuracao.md) (9 testes).
-- `plugin/claude_cli/client.py` — `ClaudeCLIClient`, facade `.chat.completions.create(...)` (8 testes).
-- `plugin/claude_cli/__init__.py` — registro do `ProviderProfile` com `auth_type="external_process"`, import de `providers` guardado (não quebra fora de um processo Hermes real) (1 teste).
-- `plugin/claude_cli/models.py` — catálogo estático de modelos.
-- **Smoke test manual real** (não automatizado, para não gastar uso a cada `pytest`): chamada completa via `ClaudeCLIClient` real contra o `claude` CLI de verdade — resposta correta, system prompt respeitado, `usage`/`cost_usd` populados com valores reais (não mais zerados), conversa multi-turno preservando contexto, e caminho de erro (modelo inválido) tratado sem crash (`is_error=True`, mensagem legível). Comando usado para reproduzir manualmente:
-  ```
-  PYTHONPATH=. .venv/bin/python -c "from plugin.claude_cli.client import ClaudeCLIClient; ..."
-  ```
-- Ambiente de dev: `.venv/` local (via `uv venv` + `uv pip install pytest ruff`; `python3 -m venv` falhou neste sistema por falta do pacote `python3-venv`).
+**Fase 4 — session continuity, via `--resume`.** Investigated first (does Hermes reuse one `ClaudeCLIClient` instance across a conversation's turns, or build a new one each time?) by reading `agent/agent_runtime_helpers.py` in a fresh Hermes clone: it caches and reuses a client instance across sequential calls as long as construction kwargs don't change, only creating a fresh one for a genuinely concurrent call (which starts with no state — already the safe fallback wanted). Conclusion: per-instance state is safe.
 
-## Fase 2 — Streaming real
+Implemented: `plugin/claude_cli/session.py::compute_delta()` (pure function — returns the messages new since the last call, or `None` when continuity can't be trusted, e.g. a shorter or rewritten/compacted history). `ClaudeCLIClient` tracks `_last_messages`/`_last_session_id`/`_last_model` per instance behind a `threading.Lock`. `process.build_args()` gained `resume_session_id` (adds `--resume`, skips re-sending the system prompt since the CLI snapshots and replays it automatically on resume). Any `--resume` failure, or an `is_error=true` result, clears tracked state and falls back to a fresh full-history call automatically. New config: `CLAUDE_CLI_SESSION_CONTINUITY` (default `true`).
 
-**Decisão revisada durante a Fase 1**: não implementar um parser incremental de `stream-json` dedicado (`run_streaming`/`StreamChunk`) como planejado originalmente. Ao investigar o repositório de referência real da Nous Research (`agent/copilot_acp_client.py`, o provider `copilot-acp` bundled no Hermes), descobriu-se que **mesmo o cliente de referência oficial não faz streaming incremental de verdade** para um provider baseado em subprocesso — ele monta a resposta completa e converte para chunks via um helper compartilhado do próprio Hermes (`agent.acp_openai_bridge.completion_to_stream_chunks`). `client.py` já implementa essa mesma estratégia (`stream=True` retorna `iter([completion])`, uma única resposta completa como "stream" de um chunk) e está marcado com um comentário apontando para esta seção.
+Empirical findings that shaped this: `--resume <valid-id>` plus a prompt containing only the new message works correctly (verified: turn 1 "my favorite number is 9"; turn 2 via `--resume` with only the new question → "10"). `--resume <unknown-id>` does **not** come back as an `is_error: true` JSON result the way an API error (e.g. bad model) does — it returns empty stdout and the error on stderr ("No conversation found with session ID: ..."), exit code 1, so `run_once()` raises `ClaudeCLIProcessError` there rather than returning a `CLIResult` — that's the exception `client.py`'s fallback actually catches.
 
-Trabalho real desta fase, se for adotado no futuro: usar `--output-format stream-json --include-partial-messages` (schema de eventos já capturado e verificado — ver [06-referencia-cli-claude.md](./06-referencia-cli-claude.md)) e, em vez de reinventar o formato de chunk, chamar `agent.acp_openai_bridge.completion_to_stream_chunks` (ou o helper de streaming real equivalente, se o Hermes tiver um) a partir de eventos incrementais em vez de uma única `CLIResult` final — precisa investigar se esse helper aceita um iterador incremental ou só uma `completion` já pronta antes de prometer token-a-token de verdade.
+Deliberately out of scope: no cross-process persistence (tracking is per-`ClaudeCLIClient` instance, so it doesn't survive a Hermes process restart or separate `hermes -z ...` invocations — acceptable, since the benefit already applies to long-lived conversations inside one long-running Hermes process, the common case). Real concurrent-call racing on the same instance wasn't tested against an actual race (the lock protects the read-decide-write sequence, but the CLI's own behavior under real concurrency on the same session isn't documented or verified) — not expected to occur given how Hermes manages its own client slots.
 
-## Fase 3 — Hardening de segurança — ✅ parcialmente implementada (2026-09-18)
+**Fase 5 — packaging and distribution.**
+- `scripts/install.sh`: symlinks `plugin/claude_cli/` into `$HERMES_HOME/plugins/model-providers/claude-cli`. No second repository, no build step, no systemd. This is the recommended flow for developing the plugin (local edits apply immediately).
+- One-command install for end users: `hermes plugins install <owner>/<repo>/<subdir>` already exists natively in Hermes and solves "install without a manual clone" — no custom `pyproject.toml`/entry point needed. Repository published at `github.com/rock-apps/hermes-claude-cli` (public) to make this usable: `hermes plugins install rock-apps/hermes-claude-cli/plugin/claude_cli --enable`.
+  - Point at the `plugin/claude_cli` subdirectory, not the repo root — pointing at the root gets blocked by Hermes' built-in install-time security scanner (`plugins.scan_on_install`), which flagged a CAUTION verdict with 27 findings, almost all false positives from this repo's own `docs/*.md` files (which discuss the *original* `claude-bridge` project's security flaws in prose; the scanner text-matches without distinguishing analysis prose from real code). Scanning only the plugin subdirectory avoids that noise entirely.
+  - Update later with `hermes plugins update claude-cli-provider`.
+- Not pursued: a `pyproject.toml` + `hermes_agent.plugins` pip entry point — now low priority, since `hermes plugins install` already solves the real problem it would have addressed.
 
-- ~~Implementar o modo de permissão decidido na Fase 0~~ — feito na Fase 1.
-- ~~Filtragem explícita do ambiente repassado ao subprocesso~~ — **feito**: `process.build_subprocess_env()` (allowlist: `HOME`, `PATH`, `LANG`/`LC_*`, `TERM`, `TMPDIR`, `USER`, `LOGNAME`, `SHELL`), chamado por `client.py` em toda invocação. **Achado crítico durante a implementação, não previsto no plano original**: `ANTHROPIC_API_KEY`, se repassada ao subprocesso, sobrescreve silenciosamente a autenticação OAuth/Max e faz o CLI tentar faturar pela API key — verificado empiricamente (com uma chave inválida de propósito: sem a correção a chamada trava; com a correção, ignora a variável e funciona via OAuth normalmente). Ver [08-seguranca.md](./08-seguranca.md). 4 novos testes (`TestBuildSubprocessEnv` em `test_process.py` + 1 em `test_client.py`), suíte total agora com 65 testes.
-- ~~Revisão de redação de conteúdo sensível~~ — **feito**: testado empiricamente que o `claude` CLI não redige segredos, e que nossa arquitetura de subprocesso não tem ponto de interceptação para fazer isso do jeito que o `copilot_acp_client.py` de referência faz (ele medeia acesso a arquivo via ACP; nós não). Decisão: não implementar raspagem de saída por enquanto (risco de falso positivo > benefício). Ver [08-seguranca.md](./08-seguranca.md).
-- **Bug real encontrado e corrigido nesta fase** (fora do escopo original, achado ao testar `--add-dir` manualmente): `--add-dir` é variádico no CLI — sem um separador `--` antes do prompt, um prompt que não começa com `-` era silenciosamente engolido como mais um diretório, e a chamada falhava com "Input must be provided...". Só se manifestava com `CLAUDE_CLI_ALLOWED_DIRS` configurado (por isso não apareceu antes). Corrigido em `build_args()` (`--` sempre antes do prompt). Testado de verdade com `CLAUDE_CLI_ALLOWED_DIRS` configurado, pós-correção — funciona. 2 novos testes de regressão, suíte agora com 67 testes.
-- ~~`--restricted` como possível default~~ — **feito**: `CLAUDE_CLI_RESTRICTED` agora default `true` (era `false`). Confirmado empiricamente que não quebra chat comum e que bloqueia uma tentativa explícita de usar Bash. 1 novo teste (`test_load_config_allows_disabling_restricted_mode`), suíte agora com 68 testes.
-- **Ainda não feito**: `--max-budget-usd` sem default definido (hoje sem teto) — não é um bug, é um ajuste de postura ainda não decidido, não bloqueia nada.
+## Fase 6 (optional, on demand): dual HTTP mode
 
-## Fase 4 — Sessão contínua — ✅ implementada (2026-09-18)
+Only relevant if a real need appears to reuse this plugin's logic from tools outside Hermes (Open WebUI, Cursor, etc. — what the original `claude-bridge`'s HTTP endpoint allowed). See the rejected alternative in [04-decisao-bridge-e-necessario.md](./04-decisao-bridge-e-necessario.md#alternative-considered-and-rejected). Not built preemptively.
 
-**Pergunta central investigada antes de implementar**: o Hermes constrói um `ClaudeCLIClient` novo a cada turno, ou reaproveita a mesma instância ao longo de uma conversa? Isso decide se dá pra guardar estado em `self`. Investigado no código-fonte real do Hermes Agent (clone fresco da `main`, não suposição): `agent/agent_runtime_helpers.py` mantém um cache de client "primário" (`_ensure_primary_openai_client`, `shared=True`, criado uma vez em `agent_init`) e um cache de client "por request" (`_create_request_openai_client` → `_checkout_request_slot`, `shared=False`) que **reaproveita a mesma instância entre chamadas sequenciais enquanto os kwargs de construção não mudarem**, e só cria uma instância nova quando o slot está `in_use` (chamada concorrente) — nesse caso a nova instância nasce sem nenhum estado, o que já é o fallback seguro que a gente quer. Conclusão: estado em `self` é seguro.
+## Permanently out of scope
 
-**Implementado**:
-- `plugin/claude_cli/session.py` — `compute_delta(previous_messages, current_messages)`, lógica pura: retorna as mensagens novas desde a última chamada, ou `None` se não for seguro assumir continuidade (histórico mais curto, reescrito/compactado pelo Hermes, etc.).
-- `ClaudeCLIClient` agora guarda `_last_messages`/`_last_session_id`/`_last_model` por instância, protegidos por um `threading.Lock` (defesa extra caso alguma versão futura do Hermes compartilhe uma instância entre chamadas concorrentes de verdade — o Hermes atual, pelo que foi investigado, já evita isso do lado dele).
-- `process.build_args()` ganhou `resume_session_id`: quando setado, adiciona `--resume <id>` e **não** reenvia o system prompt (o CLI já snapshota e reaplica o system prompt automaticamente em resumes — `--system-prompt-snapshot`, default `on`).
-- Se o `--resume` falhar (sessão expirada/desconhecida), cai automaticamente para uma chamada nova com o histórico completo, e limpa o estado rastreado. Mesma coisa se o resultado vier com `is_error=true`.
-- Config nova: `CLAUDE_CLI_SESSION_CONTINUITY` (default `true`, ver [07-configuracao.md](./07-configuracao.md)).
-
-**Achados empíricos que moldaram a implementação** (testados direto contra o `claude` CLI real, não assumidos):
-- `--resume <id-válido>` combinado com um prompt contendo só a mensagem nova funciona corretamente — o CLI usa o contexto da sessão anterior sem precisar que ela seja reenviada. Confirmado com um teste de fato (turno 1: "meu número favorito é 9"; turno 2, via `--resume` só com a pergunta nova: "qual é meu número favorito mais 1?" → resposta "10").
-- `--resume <id-nunca-visto>` **não** devolve um JSON com `is_error: true` como os erros de API (ex.: modelo inválido) — devolve **stdout vazio** e a mensagem de erro em **stderr** ("No conversation found with session ID: ..."), com exit code 1. Isso significa que `run_once()` **levanta `ClaudeCLIProcessError`** nesse caso (não retorna um `CLIResult`) — é exatamente esse tipo de exceção que o fallback em `client.py` precisa capturar, não checar `result.is_error`.
-
-**Prova E2E real** (duas chamadas sequenciais via `ClaudeCLIClient` de verdade, sem mock): turno 1 sem `--resume`; turno 2 com `--resume <session_id real capturado do turno 1>` e o prompt final enviado contendo só o delta (resposta do assistente + pergunta nova), **sem** o texto original do turno 1 — e resposta final correta ("10"). Ver a suíte `TestSessionContinuity` em `tests/test_client.py` e `tests/test_session.py` para a cobertura unitária (14 novos testes, suíte total com 81 testes, `ruff check` limpo).
-
-**Não implementado / decisões conscientes de escopo**:
-- Nenhuma persistência entre processos: o rastreamento é só por instância de `ClaudeCLIClient`, então não sobrevive a um restart do processo do Hermes nem a invocações separadas de `hermes -z ...` (cada uma é um processo novo). Isso é aceitável — o ganho já vale para conversas longas dentro de um processo Hermes de vida longa (chat interativo, dashboard, bots), que é o caso comum.
-- Concorrência real (duas chamadas de verdade simultâneas na mesma instância) não foi testada com um cenário de corrida de fato — o `threading.Lock` protege a leitura+escrita do estado, mas o comportamento "correto" nesse caso (não documentado pelo CLI) não foi validado empiricamente; na prática, dado como o Hermes gerencia seus próprios slots (`in_use`), esse cenário não deveria ocorrer pelo caminho normal.
-
-## Fase 5 — Empacotamento e distribuição — ✅ parcialmente implementada (2026-09-18)
-
-- ~~Script de instalação simplificado~~ — **feito**: `scripts/install.sh` — symlinka `plugin/claude_cli/` em `$HERMES_HOME/plugins/model-providers/claude-cli`, sem clone de segundo repositório, sem `go build`, sem systemd. Testado num `HERMES_HOME` descartável, inclusive idempotência (rodar duas vezes não quebra).
-- ~~Documentação de usuário final~~ — **feito**: `README.md` atualizado com instalação e status real.
-- **Descoberta**: esta própria máquina de desenvolvimento já tem um Hermes Agent real instalado (`hermes` no PATH, v0.18.2, em `~/.hermes/hermes-agent`) — separado do sandbox descartável usado na validação E2E da Fase 1. Instalado de verdade (com autorização explícita do usuário), incluindo `hermes update` (ver seção no topo deste documento).
-- ~~Instalação sem clone manual~~ — **feito e é o método recomendado agora** (2026-09-18): descoberto que `hermes plugins install <owner>/<repo>[/<subdir>]` já existe nativamente no Hermes e resolve exatamente isso, sem precisar de `pyproject.toml`/entry point próprio. Repositório publicado em `github.com/rock-apps/hermes-claude-cli` (público, com autorização explícita do usuário) para viabilizar isso. Comando: `hermes plugins install rock-apps/hermes-claude-cli/plugin/claude_cli --enable`.
-  - **Importante**: apontar para o subdiretório `plugin/claude_cli` (não a raiz do repo) — testado primeiro contra a raiz do repo e o scanner de segurança embutido do Hermes (`plugins.scan_on_install`) bloqueou a instalação com veredito CAUTION e 27 achados, quase todos falsos positivos vindos dos próprios `docs/*.md` (que documentam, em prosa, falhas de segurança do projeto original `claude-bridge` — o scanner faz pattern-matching textual sem diferenciar "código real" de "documentação sobre código de terceiro"). Apontando só para o subdiretório do plugin de verdade, a instalação passa limpa (só o código Python real é escaneado).
-  - Atualizar depois: `hermes plugins update claude-cli-provider`.
-  - `scripts/install.sh` (clone manual + symlink) continua existindo e é o fluxo recomendado para quem for **desenvolver** este plugin (edição local reflete na hora, sem reinstalar) — ver README.
-- **Ainda não feito**: avaliar `pyproject.toml` + entry point `hermes_agent.plugins` — com `hermes plugins install` já resolvendo o caso de uso real ("instalar sem clone manual"), isso vira baixa prioridade, só relevante se um dia quisermos distribuir via `pip` puro fora do ecossistema de plugins do Hermes.
-
-## Fase 6 (opcional, sob demanda) — Modo HTTP dual
-
-Só se surgir um requisito real de reuso do "bridge" por ferramentas fora do Hermes (Open WebUI, Cursor, etc., como o `claude-bridge` original permitia). Ver alternativa rejeitada em [04-decisao-bridge-e-necessario.md](./04-decisao-bridge-e-necessario.md#alternativa-considerada-e-rejeitada-para-v1). Não implementar preventivamente (YAGNI).
-
-## Fora de escopo permanente (a menos que explicitamente solicitado)
-
-`model-router` e `zai-proxy` (trocar o backend de modelo do próprio Claude Code por DeepSeek/z.ai) — ver justificativa em [09-escopo-e-migracao.md](./09-escopo-e-migracao.md). Se a Rock Apps quiser isso, deve nascer como projeto/decisão separada, não como parte deste plugin.
+`model-router` and `zai-proxy` (routing the Claude Code CLI's own model backend to DeepSeek/z.ai) — see [09-escopo-e-migracao.md](./09-escopo-e-migracao.md). If ever wanted, it's a separate project, not part of this plugin.

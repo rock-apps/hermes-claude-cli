@@ -1,34 +1,32 @@
-# 03 — Como o Hermes Agent realmente trata providers
+# 03 — How Hermes Agent actually handles providers
 
-Fonte: código-fonte real de [`NousResearch/hermes-agent`](https://github.com/NousResearch/hermes-agent) (`providers/base.py`, `providers/__init__.py`, `plugins/model-providers/copilot-acp/`, `agent/copilot_acp_client.py`, `website/docs/developer-guide/adding-providers.md`) — **não** documentação de terceiros. Esta é a peça de análise que os dois repositórios originais não tinham (ou não aplicaram).
+Source: real [`NousResearch/hermes-agent`](https://github.com/NousResearch/hermes-agent) code (`providers/base.py`, `providers/__init__.py`, `plugins/model-providers/copilot-acp/`, `agent/copilot_acp_client.py`, `website/docs/developer-guide/adding-providers.md`) — not third-party documentation. This is the piece of research the two original projects didn't have (or didn't apply).
 
-## Descoberta de plugins
+## Plugin discovery
 
-`providers/__init__.py::_discover_providers()` escaneia, na primeira chamada a `get_provider_profile()` ou `list_providers()`:
+`providers/__init__.py::_discover_providers()` scans, on the first call to `get_provider_profile()` or `list_providers()`:
 
-1. `plugins/model-providers/<nome>/` — bundled no próprio Hermes Agent.
-2. `$HERMES_HOME/plugins/model-providers/<nome>/` — plugins do usuário (**é aqui que nosso plugin será instalado**, exatamente como o `claude-cli` original fazia).
-3. (opcional, opt-in) pacotes `pip` que declaram um entry point `hermes_agent.plugins`.
+1. `plugins/model-providers/<name>/` — bundled with Hermes Agent itself.
+2. `$HERMES_HOME/plugins/model-providers/<name>/` — user plugins (this is where this plugin installs, same convention the original `claude-cli` used).
+3. (optional, opt-in) `pip` packages declaring a `hermes_agent.plugins` entry point.
 
-Cada diretório precisa de `__init__.py` (chama `register_provider(profile)` no nível de módulo) + `plugin.yaml` (manifesto: `name`, `kind: model-provider`, `version`, `description`, `author`). Plugins de usuário sobrescrevem bundled do mesmo nome (last-writer-wins).
+Each directory needs `__init__.py` (calls `register_provider(profile)` at module level) plus `plugin.yaml` (manifest: `name`, `kind: model-provider`, `version`, `description`, `author`). User plugins override bundled ones with the same name (last-writer-wins).
 
-## A abstração central: `ProviderProfile` (dataclass, `providers/base.py`)
+## The core abstraction: `ProviderProfile` (dataclass, `providers/base.py`)
 
-Campos relevantes para esta análise:
-
-- `api_mode: str = "chat_completions"` — como o transporte formata o request. Valores possíveis no código-fonte: `chat_completions` (a maioria dos providers, incl. o `claude-cli` original), `anthropic_messages` (o provider `anthropic` nativo do Hermes), `codex_responses` (OpenAI Codex, xAI Grok, Meta/Muse Spark, Ramp Router).
-- `auth_type: str = "api_key"` — outros valores: `oauth_device_code`, `oauth_external`, `copilot`, `aws_sdk`, **`external_process`**.
-- `base_url: str` — obrigatório para o caminho HTTP padrão.
-- **Campos específicos de `auth_type="external_process"`**: `process_command`, `process_args`, `process_command_env_vars`, `process_args_env_var` — "An agent CLI driven over stdio (ACP) rather than an HTTP endpoint." (comentário literal do código-fonte).
-- **`create_client(self, **client_kwargs) -> Any | None`** — hook que, por padrão, retorna `None` (o core constrói o cliente `openai.OpenAI` padrão apontando para `base_url`). Uma subclasse pode sobrescrever e devolver **qualquer objeto** que implemente a interface mínima que o restante do Hermes espera (`.chat.completions.create(...)`), incluindo um objeto que não faz nenhuma chamada de rede. Docstring literal:
+- `api_mode: str = "chat_completions"` — how the transport formats the request. Other values in the source: `anthropic_messages` (Hermes' native `anthropic` provider), `codex_responses` (OpenAI Codex, xAI Grok, Meta/Muse Spark, Ramp Router).
+- `auth_type: str = "api_key"` — other values: `oauth_device_code`, `oauth_external`, `copilot`, `aws_sdk`, and **`external_process`**.
+- `base_url: str` — required for the standard HTTP path.
+- **Fields specific to `auth_type="external_process"`**: `process_command`, `process_args`, `process_command_env_vars`, `process_args_env_var` — "An agent CLI driven over stdio (ACP) rather than an HTTP endpoint" (literal source comment).
+- **`create_client(self, **client_kwargs) -> Any | None`** — hook that returns `None` by default (the core builds the standard `openai.OpenAI` client pointed at `base_url`). A subclass can override it and return *any* object implementing the minimal interface the rest of Hermes expects (`.chat.completions.create(...)`), including one that makes no network calls at all. Literal docstring:
 
   > "This is the hook that lets a provider ship *outside* this tree: with it, a profile registered from `~/.hermes/plugins/model-providers/` or a pip entry point can supply its own transport without any core edit. See `plugins/model-providers/copilot-acp/` for the in-tree example."
 
-Ou seja: **o próprio Hermes Agent documenta, no código-fonte, que este é o mecanismo certo para o nosso caso de uso.**
+Hermes Agent's own source documents this as the intended mechanism for exactly this use case.
 
-## Prova de conceito já existente em produção: `copilot-acp`
+## Existing production proof of concept: `copilot-acp`
 
-`plugins/model-providers/copilot-acp/__init__.py` (bundled, mantido pela Nous Research):
+`plugins/model-providers/copilot-acp/__init__.py` (bundled, maintained by Nous Research):
 
 ```python
 class CopilotACPProfile(ProviderProfile):
@@ -38,8 +36,8 @@ class CopilotACPProfile(ProviderProfile):
 
 copilot_acp = CopilotACPProfile(
     name="copilot-acp",
-    api_mode="chat_completions",       # o transporte trata como chat_completions
-    base_url="acp://copilot",          # URL simbólica, nunca é usada para HTTP de fato
+    api_mode="chat_completions",       # transport treats it as chat_completions
+    base_url="acp://copilot",          # symbolic URL, never used for real HTTP
     auth_type="external_process",
     process_command="copilot",
     process_args=("--acp", "--stdio"),
@@ -49,26 +47,26 @@ copilot_acp = CopilotACPProfile(
 register_provider(copilot_acp)
 ```
 
-`agent/copilot_acp_client.py` (476 linhas) implementa `CopilotACPClient`, uma classe que:
+`agent/copilot_acp_client.py` (476 lines) implements `CopilotACPClient`, which:
 
-- Expõe `.chat.completions.create(...)` (via `SimpleNamespace`) — a mesma superfície que o SDK `openai` real exporia, então o resto do Hermes (`run_agent.py`) não precisa saber que não é HTTP.
-- Internamente, faz `subprocess.Popen([...], stdin=PIPE, stdout=PIPE, stderr=PIPE)` do binário `copilot --acp --stdio` e conversa **JSON-RPC 2.0 sobre stdio** (protocolo ACP — Agent Client Protocol) diretamente, em threads próprias para ler stdout/stderr sem bloquear.
-- Declara `HERMES_SKIP_TRANSPORT_WRAP = True` e `HERMES_SKIP_ASYNC_WRAP = True` — sinalizando ao core que este cliente já é "completo" e não deve ser re-envelopado pela camada de transporte HTTP genérica.
-- Implementa timeouts, um "probe" de compatibilidade (`_acp_supported`) para falhar rápido se o binário não suportar o protocolo, tratamento de permissões de arquivo (`_ensure_path_within_cwd`, nega paths fora do `cwd` da sessão), e redação de conteúdo sensível (`redact_sensitive_text`) antes de devolver conteúdo de arquivos lidos pela sessão ACP.
+- Exposes `.chat.completions.create(...)` (via `SimpleNamespace`) — the same surface the real `openai` SDK would, so the rest of Hermes (`run_agent.py`) doesn't need to know it isn't HTTP.
+- Internally runs `subprocess.Popen([...], stdin=PIPE, stdout=PIPE, stderr=PIPE)` on the `copilot --acp --stdio` binary and speaks **JSON-RPC 2.0 over stdio** (the ACP — Agent Client Protocol) directly, with dedicated threads reading stdout/stderr without blocking.
+- Declares `HERMES_SKIP_TRANSPORT_WRAP = True` and `HERMES_SKIP_ASYNC_WRAP = True` — telling the core this client is already "complete" and shouldn't be re-wrapped by the generic HTTP transport layer.
+- Implements timeouts, a compatibility probe (`_acp_supported`) to fail fast if the binary doesn't support the protocol, file-permission handling (`_ensure_path_within_cwd`, denies paths outside the session `cwd`), and content redaction (`redact_sensitive_text`) before returning file content read during the ACP session.
 
-**Este é o padrão de referência para a nova arquitetura** — não porque o `claude` CLI suporte o mesmo protocolo ACP (não suporta, ver [06](./06-referencia-cli-claude.md)), mas porque a **classe de solução** (`create_client()` + `auth_type="external_process"` + uma classe de cliente que fala com um subprocesso via stdio) é exatamente o buraco que o `claude-bridge` (HTTP) tentou preencher de um jeito mais pesado e menos seguro.
+This is the reference pattern this plugin follows — not because the `claude` CLI speaks the same ACP protocol (it doesn't, see [06](./06-referencia-cli-claude.md)), but because the *class of solution* (`create_client()` + `auth_type="external_process"` + a client class that talks to a subprocess over stdio) is exactly the gap an HTTP bridge would otherwise fill, more heavily and less safely.
 
-## Distribuição alternativa: entry point `pip`
+## Alternative distribution: `pip` entry point
 
-`providers/__init__.py::_discover_entry_point_providers()` também suporta plugins distribuídos como pacote `pip` normal, via:
+`providers/__init__.py::_discover_entry_point_providers()` also supports plugins distributed as a normal `pip` package:
 
 ```toml
 [project.entry-points."hermes_agent.plugins"]
 claude-cli = "hermes_claude_cli:register"
 ```
 
-Com uma ressalva importante: **é opt-in** — só carrega entry points cujo nome está na lista `plugins.enabled` da configuração do Hermes. É uma opção de distribuição mais "profissional" (versionamento via `pip`, sem symlink manual), mas exige que o usuário habilite explicitamente. Ver decisão de escopo em [10-roadmap.md](./10-roadmap.md) — v1 usa o caminho de diretório (igual ao original, sem fricção adicional), pip entry point fica como evolução futura opcional.
+With one caveat: it's opt-in — only entry points whose name is in Hermes' `plugins.enabled` config get loaded. This plugin uses the directory/symlink path instead (no added friction), matching how it's installed today; the entry point remains a possible future distribution option, tracked as low priority in [10-roadmap.md](./10-roadmap.md).
 
-## O que isso implica para o "protocolo de wire"
+## What this means for the wire protocol
 
-O Hermes armazena histórico de conversa internamente no formato **OpenAI chat-completions** (mensagens com `role`/`content`, `tool_calls` com `function.arguments` stringificado, mensagens `role: "tool"`). Isso é verdade **independente do transporte** — mesmo o `CopilotACPClient`, que não fala HTTP, recebe `messages` no formato OpenAI e faz a tradução internamente para o protocolo nativo do backend. Ou seja, mesmo removendo o servidor HTTP, **ainda precisamos de uma camada de tradução de mensagens** — só que ela vive dentro do processo do Hermes, como código Python puro, e não como servidor de rede separado.
+Hermes stores conversation history internally in the **OpenAI chat-completions** shape (`role`/`content` messages, `tool_calls` with stringified `function.arguments`, `role: "tool"` messages). That's true regardless of transport — even `CopilotACPClient`, which doesn't speak HTTP, receives `messages` in the OpenAI shape and translates internally to its backend's native protocol. So removing the HTTP server doesn't remove the need for a message-translation layer — it just moves that layer inside the Hermes process, as plain Python, instead of a separate network service.
