@@ -64,11 +64,12 @@ Trabalho real desta fase, se for adotado no futuro: usar `--output-format stream
 - Mapear sessão do Hermes ⇄ `--session-id`/`--resume` do `claude` CLI, evitando reenviar o histórico completo a cada turno.
 - Testar cenários de expiração/compactação de sessão e concorrência (chamadas simultâneas na mesma sessão).
 
-## Fase 5 — Empacotamento e distribuição
+## Fase 5 — Empacotamento e distribuição — ✅ parcialmente implementada (2026-09-18)
 
-- Avaliar `pyproject.toml` + entry point `hermes_agent.plugins` como alternativa ao symlink manual (ver [03](./03-modelo-de-provider-do-hermes.md)), mantendo o caminho de diretório/symlink como opção sempre suportada.
-- Script de instalação simplificado (sem clone de segundo repositório, sem `go build`, sem systemd) substituindo o `install.sh` original.
-- Documentação de usuário final (README do repositório) só depois da Fase 1 estar validada — evita documentar comportamento que ainda vai mudar.
+- ~~Script de instalação simplificado~~ — **feito**: `scripts/install.sh` — symlinka `plugin/claude_cli/` em `$HERMES_HOME/plugins/model-providers/claude-cli`, sem clone de segundo repositório, sem `go build`, sem systemd. Testado num `HERMES_HOME` descartável, inclusive idempotência (rodar duas vezes não quebra).
+- ~~Documentação de usuário final~~ — **feito**: `README.md` atualizado com instalação e status real.
+- **Descoberta**: esta própria máquina de desenvolvimento já tem um Hermes Agent real instalado (`hermes` no PATH, v0.18.2, em `~/.hermes/hermes-agent`) — separado do sandbox descartável usado na validação E2E da Fase 1. Instalar o plugin aí de verdade (rodando `./scripts/install.sh` sem `HERMES_HOME` customizado) é possível a qualquer momento, mas é uma ação fora deste repositório, em ambiente já em uso — não feito automaticamente, fica para quando o usuário pedir explicitamente.
+- **Ainda não feito**: avaliar `pyproject.toml` + entry point `hermes_agent.plugins` como alternativa ao symlink manual (ver [03](./03-modelo-de-provider-do-hermes.md)) — o symlink já está validado E2E e funcionando; entry point fica como evolução opcional, não bloqueia nada.
 
 ## Fase 6 (opcional, sob demanda) — Modo HTTP dual
 
