@@ -38,7 +38,15 @@ def build_server() -> MCPServer:
             "per-request tool schemas from its caller, so Hermes' own tools: array never "
             "reaches it — this bridge is configured MCP, which the CLI does support). "
             "Set $HERMES_MCP_PROFILE in this server's environment to target a specific "
-            "Hermes profile instead of the default one."
+            "Hermes profile instead of the default one.\n\n"
+            "IMPORTANT — do not confuse these with the unrelated built-in session tools "
+            "named CronCreate/CronList/CronDelete: those schedule a wake-up for THIS "
+            "Claude session and have nothing to do with Hermes. The tools in THIS server "
+            "(cron_create, cron_list, ...) create real, durable jobs in Hermes' own "
+            "scheduler, which persist across restarts and actually message the user back "
+            "through Hermes' own delivery channels (Slack, Telegram, etc.) — use these, "
+            "not the built-in ones, for anything the user describes as a recurring check, "
+            "reminder, or scheduled task they want Hermes itself to run."
         ),
     )
     for fn in _TOOLS:

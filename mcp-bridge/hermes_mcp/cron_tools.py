@@ -11,7 +11,10 @@ from hermes_mcp.runner import run_hermes
 
 
 def cron_list(include_disabled: bool = False) -> str:
-    """List scheduled jobs. Set `include_disabled` to also show paused jobs."""
+    """List Hermes' own recurring scheduled jobs (durable, survive restarts,
+    deliver back through Hermes' own channels). Not the built-in session
+    CronCreate/CronList/CronDelete tools, which are unrelated to Hermes.
+    Set `include_disabled` to also show paused jobs."""
     args = ["cron", "list"]
     if include_disabled:
         args.append("--all")
@@ -30,12 +33,17 @@ def cron_create(
     reasoning_effort: str = "",
     paused: bool = False,
 ) -> str:
-    """Create a recurring scheduled job.
+    """Create a real, durable recurring job in Hermes' own scheduler — use this
+    (not the unrelated built-in session CronCreate tool) whenever the user asks
+    to be checked on, reminded, or have something run periodically going
+    forward, including across restarts of this chat.
 
     `schedule` is a cron expression ('0 9-18 * * 1-5') or an interval
     ('every 1h', '30m'). `prompt` is the self-contained instruction the job
-    runs each time it fires. Set `continuity=True` so each run sees its own
-    previous output and only reports what changed since then.
+    runs each time it fires — required unless a `skill` covers it (the
+    underlying `hermes cron create` rejects a call with neither). Set
+    `continuity=True` so each run sees its own previous output and only
+    reports what changed since then.
     """
     args = ["cron", "create", schedule]
     if prompt:
@@ -75,5 +83,6 @@ def cron_remove(job_id: str) -> str:
 
 
 def cron_status() -> str:
-    """Check whether the cron scheduler is running."""
+    """Check whether Hermes' own cron scheduler (not the built-in session
+    scheduler) is running."""
     return run_hermes("cron", "status").output
