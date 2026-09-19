@@ -1,0 +1,16 @@
+[project]
+name = "hermes-mcp-bridge"
+version = "0.1.0"
+description = "MCP server exposing Hermes Agent's native cron/kanban CLI as tools the claude CLI can see (bypassing the tools: passthrough limitation, without leaving Max-subscription OAuth)."
+requires-python = ">=3.10"
+dependencies = ["mcp>=2.0.0"]
+
+[project.scripts]
+hermes-mcp-bridge = "hermes_mcp.__main__:main"
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
