@@ -42,7 +42,7 @@ A no-op `close()` was also added (Hermes calls it unconditionally during provide
 
 **Fase 0 (pre-implementation decisions)** — all resolved except the repository license (still no `LICENSE` file, undecided).
 
-**Fase 1 — functional provider parity.** `plugin/claude_cli/{protocol,process,config,client,models,__init__}.py`. Real `--output-format json` parsing (`total_cost_usd`/`usage`/`session_id`/`is_error`) — fixes the original bridge's bug of those fields always being zero. CLI JSON schema verified empirically against a real installed `claude` CLI (v2.1.276), not assumed.
+**Fase 1 — functional provider parity.** `plugin/claude_cli/{protocol,process,config,client,models,__init__}.py`. Real `--output-format json` parsing (`total_cost_usd`/`usage`/`session_id`/`is_error`). CLI JSON schema verified empirically against a real installed `claude` CLI (v2.1.276), not assumed.
 
 **Fase 2 — real token streaming — built after all.** Originally skipped: Hermes' own `copilot_acp_client.py` reference doesn't do real incremental streaming either, so `stream=True` just replayed one finished completion as a single fake chunk. Revisited after real usage on a personal deployment surfaced the actual cost of that choice: with no incremental output, Hermes' UI shows "waiting on sonnet — no stream output for Ns" for the entire duration of a `claude` call (which can be long — extended thinking on a hard prompt easily exceeds a minute) with zero feedback, indistinguishable from a hang.
 
@@ -70,13 +70,13 @@ Deliberately out of scope: no cross-process persistence (tracking is per-`Claude
 **Fase 5 — packaging and distribution.**
 - `scripts/install.sh`: symlinks `plugin/claude_cli/` into `$HERMES_HOME/plugins/model-providers/claude-cli`. No second repository, no build step, no systemd. This is the recommended flow for developing the plugin (local edits apply immediately).
 - One-command install for end users: `hermes plugins install <owner>/<repo>/<subdir>` already exists natively in Hermes and solves "install without a manual clone" — no custom `pyproject.toml`/entry point needed. Repository published at `github.com/rock-apps/hermes-claude-cli` (public) to make this usable: `hermes plugins install rock-apps/hermes-claude-cli/plugin/claude_cli --enable`.
-  - Point at the `plugin/claude_cli` subdirectory, not the repo root — pointing at the root gets blocked by Hermes' built-in install-time security scanner (`plugins.scan_on_install`), which flagged a CAUTION verdict with 27 findings, almost all false positives from this repo's own `docs/*.md` files (which discuss the *original* `claude-bridge` project's security flaws in prose; the scanner text-matches without distinguishing analysis prose from real code). Scanning only the plugin subdirectory avoids that noise entirely.
+  - Point at the `plugin/claude_cli` subdirectory, not the repo root — pointing at the root gets blocked by Hermes' built-in install-time security scanner (`plugins.scan_on_install`), which flagged a CAUTION verdict with 27 findings, almost all false positives from this repo's own `docs/*.md` files (security-analysis prose the scanner text-matches without distinguishing from real code). Scanning only the plugin subdirectory avoids that noise entirely.
   - Update later with `hermes plugins update claude-cli-provider`.
 - Not pursued: a `pyproject.toml` + `hermes_agent.plugins` pip entry point — now low priority, since `hermes plugins install` already solves the real problem it would have addressed.
 
 ## Fase 6 (optional, on demand): dual HTTP mode
 
-Only relevant if a real need appears to reuse this plugin's logic from tools outside Hermes (Open WebUI, Cursor, etc. — what the original `claude-bridge`'s HTTP endpoint allowed). See the rejected alternative in [04-is-bridge-necessary.md](./04-is-bridge-necessary.md#alternative-considered-and-rejected). Not built preemptively.
+Only relevant if a real need appears to reuse this plugin's logic from tools outside Hermes (Open WebUI, Cursor, etc.). See the rejected alternative in [04-is-bridge-necessary.md](./04-is-bridge-necessary.md#alternative-considered-and-rejected). Not built preemptively.
 
 ## Permanently out of scope
 

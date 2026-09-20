@@ -8,7 +8,7 @@ Gathered from `claude --help` on the locally installed version (**Claude Code 2.
 |---|---|
 | `-p`, `--print` | Non-interactive mode: print the response and exit. Required for backend use. |
 | `--model <alias\|id>` | Selects the model (`sonnet`, `opus`, `haiku`, or a full ID). |
-| `--output-format json` | Structured JSON result on stdout — `total_cost_usd`, `usage`, `session_id`, `is_error`, `stop_reason`, `result` are all parsed from this. Verified against a real invocation, not assumed (see [01](./01-analysis-claude-bridge.md) for the bug in the original bridge this fixes: it never passed this flag, so cost/usage were always zero). |
+| `--output-format json` | Structured JSON result on stdout — `total_cost_usd`, `usage`, `session_id`, `is_error`, `stop_reason`, `result` are all parsed from this. Verified against a real invocation, not assumed. |
 | `--append-system-prompt <text>` | Appends to the default system prompt. Only sent on a fresh (non-resumed) call — see below. |
 | `--resume <id>` | Resumes a prior session by the `session_id` a previous call returned, so only the new message(s) need to be sent — see Fase 4 in [10-roadmap.md](./10-roadmap.md). |
 | `--add-dir <dirs...>` | Grants read access to directories outside the cwd. Variadic — see the `--` note below. |
@@ -30,7 +30,7 @@ Gathered from `claude --help` on the locally installed version (**Claude Code 2.
 | `--session-id <uuid>` | Setting an explicit session id ourselves. Not needed: `--resume <id>` uses the id `claude` already assigned on the prior turn instead. |
 | `--json-schema <schema>` | Structured output validation — no current use case for it. |
 | `--exclude-dynamic-system-prompt-sections` | Improves prompt-cache reuse across resumed sessions by stripping volatile sections (cwd, git status) from the system prompt. Not needed today: on `--resume`, `--append-system-prompt` isn't even sent (see below), so there's no repeated system-prompt text to strip in the first place. |
-| `--safe-mode` | Used by the original `claude-bridge`; dropped — no clear need identified for this integration. |
+| `--safe-mode` | Investigated; dropped — no clear need identified for this integration. |
 
 ## System prompt and `--resume` interact
 

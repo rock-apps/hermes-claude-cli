@@ -5,8 +5,7 @@ directly as a subprocess — no HTTP server involved anywhere. Every request run
 against the Claude Code subscription's base plan allowance instead of per-token API
 credits.
 
-Architecture rationale and the decision not to use an HTTP bridge (unlike this
-plugin's inspirations, niski84/claude-bridge and niski84/hermes-claude-cli) are in
+Architecture rationale and the decision not to use an HTTP bridge are in
 ../../docs/04-is-bridge-necessary.md and
 ../../docs/05-unified-architecture.md. The `auth_type="external_process"` +
 `create_client()` pattern used below mirrors Hermes Agent's own bundled

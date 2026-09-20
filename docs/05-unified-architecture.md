@@ -37,7 +37,7 @@
                  Claude Max subscription (base plan allowance)
 ```
 
-Compare with the original two-repository design: see the equivalent diagram in [01](./01-analysis-claude-bridge.md) — that one had a network hop (`HTTP :9180`) and a systemd process, both absent here.
+No network hop and no systemd process anywhere in this diagram — the `claude` subprocess runs inline inside Hermes' own process.
 
 ## Module layout (`plugin/claude_cli/`)
 
@@ -93,7 +93,7 @@ Mirrors `CopilotACPClient`'s minimal surface (see [03](./03-hermes-provider-mode
 
 ### `protocol.py`
 
-Pure translation functions, no I/O: `flatten_messages()` (system prompt + transcript + current message, ported and corrected from `claude-bridge`'s Go `flattenMessages`/`stringifyContent` — see [01](./01-analysis-claude-bridge.md) for the bug this fixes), `normalize_model_alias()` (collapses a full model ID to a bare alias when it matches `sonnet`/`opus`/`haiku`), `map_stop_reason()` (`claude`'s `stop_reason` → an OpenAI `finish_reason`).
+Pure translation functions, no I/O: `flatten_messages()` (system prompt + transcript + current message, flattened into the single prompt string `claude -p` expects), `normalize_model_alias()` (collapses a full model ID to a bare alias when it matches `sonnet`/`opus`/`haiku`), `map_stop_reason()` (`claude`'s `stop_reason` → an OpenAI `finish_reason`).
 
 ### `process.py`
 
@@ -109,7 +109,7 @@ Pure translation functions, no I/O: `flatten_messages()` (system prompt + transc
 
 ## No `scripts/reload.sh` / systemd equivalent, and why
 
-There's no long-running process to restart. The `claude` "process" is spawned and destroyed per call (or reused across a resumed session's lifetime — still no persistent process, just a resumable id), inside Hermes' own process lifecycle. That removes a whole category of operational problems (zombie processes, port conflicts, restart-after-crash) that the original bridge needed `scripts/reload.sh` (kill → build → start → poll health) to manage.
+There's no long-running process to restart. The `claude` "process" is spawned and destroyed per call (or reused across a resumed session's lifetime — still no persistent process, just a resumable id), inside Hermes' own process lifecycle — no zombie processes, port conflicts, or restart-after-crash to manage.
 
 ## Install paths
 

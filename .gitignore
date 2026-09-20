@@ -1,6 +1,4 @@
-# Nunca versionar binários, PIDs ou artefatos de build.
-# O repositório claude-bridge original cometeu esse erro (ver docs/01-analise-claude-bridge.md)
-# — não repetir aqui.
+# Never version binaries, PIDs, or build artifacts.
 *.pid
 *.log
 *.bak

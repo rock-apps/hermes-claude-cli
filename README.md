@@ -2,7 +2,7 @@
 
 A model provider plugin for [Hermes Agent](https://github.com/NousResearch/hermes-agent) that exposes the official `claude` CLI (Claude Code), authenticated with a **Claude Max subscription**, as a first-class provider — no HTTP bridge involved.
 
-> **Status**: implemented and validated end-to-end inside a real Hermes Agent install (including the maintainer's own personal instance, post-`hermes update`). 81 tests, `ruff`-clean. See [`docs/10-roadmap.md`](./docs/10-roadmap.md) for what shipped and what's still open, and [`CLAUDE.md`](./CLAUDE.md) for a maintainer-oriented summary.
+> **Status**: implemented and validated end-to-end inside real Hermes Agent installs, including production. 106 tests in the plugin + 37 in [`mcp-bridge/`](./mcp-bridge/), `ruff`-clean. See [`docs/10-roadmap.md`](./docs/10-roadmap.md) for what shipped and what's still open, and [`CLAUDE.md`](./CLAUDE.md) for a maintainer-oriented summary.
 
 ## Why
 
@@ -19,7 +19,7 @@ hermes plugins install rock-apps/hermes-claude-cli/plugin/claude_cli --enable
 hermes gateway restart   # if the gateway is already running
 ```
 
-No manual cloning — `hermes` clones just the plugin subdirectory (not the whole analysis/docs repo), runs it through Hermes' built-in security scanner, and enables it. Then:
+No manual cloning — `hermes` clones just the plugin subdirectory, runs it through Hermes' built-in security scanner, and enables it. Then:
 
 ```bash
 hermes model   # look for "Claude CLI (Max subscription)"
@@ -51,13 +51,6 @@ Configuration is via environment variables (all optional) — see [`docs/07-conf
 
 Start at [`docs/README.md`](./docs/README.md). Highlights:
 
-- [`docs/04-is-bridge-necessary.md`](./docs/04-is-bridge-necessary.md) — why this project does **not** run an HTTP server, unlike the projects that inspired it.
+- [`docs/04-is-bridge-necessary.md`](./docs/04-is-bridge-necessary.md) — why this project does **not** run an HTTP server.
 - [`docs/05-unified-architecture.md`](./docs/05-unified-architecture.md) — architecture.
 - [`docs/10-roadmap.md`](./docs/10-roadmap.md) — implementation phases and status.
-
-## Reference projects
-
-This plugin replaces and unifies two third-party projects:
-
-- [`niski84/claude-bridge`](https://github.com/niski84/claude-bridge)
-- [`niski84/hermes-claude-cli`](https://github.com/niski84/hermes-claude-cli)

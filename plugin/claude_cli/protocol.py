@@ -1,10 +1,7 @@
 """Translation between OpenAI-style chat messages and the `claude` CLI's prompt/flag interface.
 
-This is a corrected Python port of the message-flattening logic that used to live in
-the claude-bridge Go implementation (flattenMessages/stringifyContent/mapStopReason).
-The original never parsed the CLI's actual JSON output, so cost/usage fields were
-always zero; that bug lives in process.py's territory, not here — this module only
-does message <-> prompt translation.
+Pure message <-> prompt translation, no I/O — cost/usage parsing from the CLI's
+actual JSON output lives in process.py, not here.
 """
 
 from __future__ import annotations

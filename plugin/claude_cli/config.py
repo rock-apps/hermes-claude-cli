@@ -1,8 +1,7 @@
 """Environment-variable configuration for the claude-cli provider plugin.
 
-Full configuration surface is documented in ../../docs/07-configuration.md. Unlike the
-original claude-bridge, there is no hardcoded list of personal directories — see
-../../docs/01-analysis-claude-bridge.md for why that was a problem worth not repeating.
+Full configuration surface is documented in ../../docs/07-configuration.md. There is no
+hardcoded list of personal directories — see ``CLAUDE_CLI_ALLOWED_DIRS`` below.
 
 ``CLAUDE_CLI_PERMISSION_MODE`` defaults to "auto": Claude Code's own smart
 auto-approval heuristic (the same mode this project's own development sessions run
@@ -83,9 +82,9 @@ class ClaudeBinaryNotFoundError(RuntimeError):
 def find_claude_binary(env: Mapping[str, str]) -> str:
     """Locate the `claude` CLI binary.
 
-    Resolution order: ``CLAUDE_CLI_BIN`` env var, then ``CLAUDE_BIN`` (legacy name
-    from the original claude-bridge, kept for migration convenience), then a couple
-    of well-known install locations, then whatever `claude` resolves to on PATH.
+    Resolution order: ``CLAUDE_CLI_BIN`` env var, then ``CLAUDE_BIN`` (legacy fallback
+    name), then a couple of well-known install locations, then whatever `claude`
+    resolves to on PATH.
     Raises ClaudeBinaryNotFoundError if none of those exist.
     """
     explicit = env.get("CLAUDE_CLI_BIN") or env.get("CLAUDE_BIN")
