@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 
 import pytest
@@ -9,17 +10,32 @@ from hermes_mcp.runner import HermesResult, build_command, run_hermes
 
 
 class TestBuildCommand:
-    def test_defaults_to_the_bare_hermes_binary_with_no_profile(self, monkeypatch):
+    def test_falls_back_to_bare_hermes_when_no_well_known_install_exists(self, monkeypatch):
         monkeypatch.delenv("HERMES_MCP_PROFILE", raising=False)
         monkeypatch.delenv("HERMES_MCP_BIN", raising=False)
+        monkeypatch.setattr("hermes_mcp.runner.os.path.isfile", lambda path: False)
 
         command = build_command("cron", "list")
 
         assert command == ["hermes", "cron", "list"]
 
+    def test_auto_detects_well_known_install_location_when_hermes_mcp_bin_unset(self, monkeypatch):
+        # Arrange: HERMES_MCP_BIN unset — a daemonized process (e.g. hermes-webui launched
+        # without the user's shell PATH) may not have ~/.local/bin on PATH at all, so a bare
+        # "hermes" lookup fails even though the binary is installed. See docs/05-configuration.md.
+        monkeypatch.delenv("HERMES_MCP_PROFILE", raising=False)
+        monkeypatch.delenv("HERMES_MCP_BIN", raising=False)
+        home_hermes = os.path.expanduser("~/.local/bin/hermes")
+        monkeypatch.setattr("hermes_mcp.runner.os.path.isfile", lambda path: path == home_hermes)
+
+        command = build_command("cron", "list")
+
+        assert command == [home_hermes, "cron", "list"]
+
     def test_inserts_profile_flag_when_hermes_mcp_profile_is_set(self, monkeypatch):
         monkeypatch.setenv("HERMES_MCP_PROFILE", "rockapps")
         monkeypatch.delenv("HERMES_MCP_BIN", raising=False)
+        monkeypatch.setattr("hermes_mcp.runner.os.path.isfile", lambda path: False)
 
         command = build_command("kanban", "list")
 
@@ -36,6 +52,7 @@ class TestBuildCommand:
     def test_empty_hermes_mcp_profile_is_treated_as_unset(self, monkeypatch):
         monkeypatch.setenv("HERMES_MCP_PROFILE", "")
         monkeypatch.delenv("HERMES_MCP_BIN", raising=False)
+        monkeypatch.setattr("hermes_mcp.runner.os.path.isfile", lambda path: False)
 
         command = build_command("cron", "list")
 
@@ -50,6 +67,7 @@ class TestRunHermes:
 
         monkeypatch.delenv("HERMES_MCP_PROFILE", raising=False)
         monkeypatch.delenv("HERMES_MCP_BIN", raising=False)
+        monkeypatch.setattr("hermes_mcp.runner.os.path.isfile", lambda path: False)
         monkeypatch.setattr(subprocess, "run", fake_run)
 
         result = run_hermes("cron", "list")

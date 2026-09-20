@@ -71,7 +71,9 @@ Environment variables the bridge itself reads (distinct from the `CLAUDE_CLI_*` 
 | Variable | Purpose | Default |
 |---|---|---|
 | `HERMES_MCP_PROFILE` | Appends `-p <profile>` to every `hermes` call this bridge makes. Set it in the `env` block of `CLAUDE_CLI_MCP_CONFIG` above. | unset — targets the default profile |
-| `HERMES_MCP_BIN` | Path to the `hermes` binary, if not on `PATH`. | `hermes` |
+| `HERMES_MCP_BIN` | Path to the `hermes` binary, if not on `PATH`. | unset — auto-detects `~/.local/bin/hermes` / `/usr/local/bin/hermes`, else bare `hermes` on `PATH` |
+
+**Set `HERMES_MCP_BIN` explicitly whenever `claude-cli`'s parent process might be daemonized without the user's shell `PATH`.** Confirmed on a real deployment: `hermes-webui`'s own long-lived process had a bare system `PATH` (no `~/.local/bin`), so a bare `hermes` call failed with `'hermes' was not found on PATH` inside a real web UI session, even though `hermes -z`/the gateway worked fine (their `PATH` did include it). The auto-detect fallback above covers the common case, but an explicit `HERMES_MCP_BIN=/absolute/path/to/hermes` in the `env` block of `CLAUDE_CLI_MCP_CONFIG` is the reliable fix — `scripts/sync_bridges.py` does not set this for you.
 
 ## Tools exposed
 

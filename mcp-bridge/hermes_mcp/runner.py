@@ -11,6 +11,17 @@ import os
 import subprocess
 from dataclasses import dataclass
 
+# A bare "hermes" only resolves if PATH includes it. A daemonized parent process
+# (e.g. hermes-webui launched without the user's shell PATH — confirmed on a real
+# deployment to be missing ~/.local/bin entirely, see docs/05-configuration.md) can
+# spawn this bridge with a PATH that never included it, even though the binary is
+# installed. Checked before falling back to PATH resolution, same pattern as
+# plugin/claude_cli/config.py's find_claude_binary for the `claude` binary.
+_LEGACY_BIN_CANDIDATES = (
+    os.path.expanduser("~/.local/bin/hermes"),
+    "/usr/local/bin/hermes",
+)
+
 
 def build_command(*args: str) -> list[str]:
     """The `hermes` argv for `args`, targeting `$HERMES_MCP_PROFILE` if set.
@@ -19,7 +30,9 @@ def build_command(*args: str) -> list[str]:
     `claude mcp add -e HERMES_MCP_PROFILE=<name>` time) — it is not read by
     the `hermes` CLI itself, which only understands `-p <profile>`.
     """
-    binary = os.environ.get("HERMES_MCP_BIN") or "hermes"
+    binary = os.environ.get("HERMES_MCP_BIN")
+    if not binary:
+        binary = next((c for c in _LEGACY_BIN_CANDIDATES if os.path.isfile(c)), "hermes")
     profile = os.environ.get("HERMES_MCP_PROFILE") or ""
     profile_args = ["-p", profile] if profile else []
     return [binary, *profile_args, *args]
