@@ -43,6 +43,25 @@ Restart the gateway (`hermes gateway restart`) after editing `.env` — and rest
 
 **Security implication, explicit on purpose**: `CLAUDE_CLI_ALLOWED_TOOLS` pre-approves *write* actions too (`cron_create`, `cron_remove`, `kanban_complete`, ...) — the model can create/delete scheduled jobs and complete/block kanban tasks from a chat message with no human approval step. That's the whole point of building this bridge, but it's worth being deliberate about which tool names go in that list rather than pasting the full set above without reading it. For read-only access, only include `cron_list`/`cron_status`/`kanban_list`/`kanban_show`.
 
+### Onboarding multiple (or new) profiles: `scripts/sync_bridges.py`
+
+Hand-editing the JSON above doesn't scale past one or two profiles, and `create_client()` gives this plugin no way to detect which Hermes profile it's currently serving — so there is no fully automatic way to onboard a brand-new profile; each one needs its own `hermes-bridge-<profile>` entry added explicitly. `scripts/sync_bridges.py` makes that one command instead of manual JSON surgery:
+
+```bash
+# Regenerate the shared multiplex .env with every profile that should have a bridge:
+mcp-bridge/scripts/sync_bridges.py \
+  --profiles erick,rockapps,financeiro,guitarra,rodadas-dev,sharp,skill-forge-dev,tle,trex \
+  --bridge-bin /absolute/path/to/mcp-bridge/.venv/bin/hermes-mcp-bridge \
+  --env-file ~/.hermes/.env
+
+# Each profile's own .env (for standalone `hermes -z`) only needs itself:
+mcp-bridge/scripts/sync_bridges.py --profiles erick \
+  --bridge-bin /absolute/path/to/mcp-bridge/.venv/bin/hermes-mcp-bridge \
+  --env-file ~/.hermes/profiles/erick/.env
+```
+
+It replaces `CLAUDE_CLI_MCP_CONFIG`/`CLAUDE_CLI_ALLOWED_TOOLS` in place (backing up the previous `.env` as `.bak-<UTC timestamp>` first) and leaves every other line untouched. Onboarding a new profile means: install the plugin for it (`hermes -p <name> plugins install rock-apps/hermes-claude-cli/plugin/claude_cli --force --enable`), re-run both commands above with the new name added to `--profiles`, and restart the gateway — still three manual steps, not zero, because of the `create_client()` limitation above, but no more manual JSON editing.
+
 **No real per-profile isolation under multiplex.** Because the config lives in the `default` profile's `.env` and is shared by every routed profile's `claude-cli` turns, *every* profile that uses the `claude-cli` provider on a multiplexed gateway sees the *same* `CLAUDE_CLI_MCP_CONFIG`/`CLAUDE_CLI_ALLOWED_TOOLS` — including the same bridge, hardcoded to the same `HERMES_MCP_PROFILE`. A bridge configured with `HERMES_MCP_PROFILE=rockapps` is reachable from an `erick`-profile conversation too, and any action it takes still runs as `rockapps`, not `erick`. If multiple profiles need this bridge acting as themselves, register multiple MCP servers under different names in the same `CLAUDE_CLI_MCP_CONFIG` (one per profile, each with its own `HERMES_MCP_PROFILE`) and include all their tools in `CLAUDE_CLI_ALLOWED_TOOLS` — every profile will see all of them, so this is exposure, not isolation; there's no way to hide one profile's bridge from another's `claude-cli` turns on a multiplexed gateway today. A non-multiplexed (single-profile, or `gateway.multiplex_profiles: false`) deployment does not have this problem — each profile's own `.env` and installed plugin copy are what actually run.
 
 Environment variables the bridge itself reads (distinct from the `CLAUDE_CLI_*` ones above, which belong to this repo's `plugin/`, not to `mcp-bridge/`):
