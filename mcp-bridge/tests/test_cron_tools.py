@@ -88,6 +88,55 @@ class TestCronCreate:
         fake.assert_called_once_with("cron", "create", "every 1h")
 
 
+class TestCronEdit:
+    def test_minimal_call_passes_only_job_id(self, monkeypatch):
+        fake = MagicMock(return_value=_ok("Updated job t_abc\n"))
+        monkeypatch.setattr(cron_tools, "run_hermes", fake)
+
+        result = cron_tools.cron_edit(job_id="t_abc")
+
+        fake.assert_called_once_with("cron", "edit", "t_abc")
+        assert "Updated" in result
+
+    def test_all_optional_flags_are_forwarded_when_provided(self, monkeypatch):
+        fake = MagicMock(return_value=_ok())
+        monkeypatch.setattr(cron_tools, "run_hermes", fake)
+
+        cron_tools.cron_edit(
+            job_id="t_abc",
+            schedule="every 2h",
+            prompt="new instructions",
+            name="renamed-job",
+            deliver="bot-chat:rockapps",
+            repeat=3,
+            continuity=True,
+            model="opus",
+            provider="anthropic",
+            reasoning_effort="high",
+        )
+
+        fake.assert_called_once_with(
+            "cron", "edit", "t_abc",
+            "--schedule", "every 2h",
+            "--prompt", "new instructions",
+            "--name", "renamed-job",
+            "--deliver", "bot-chat:rockapps",
+            "--repeat", "3",
+            "--continuity",
+            "--model", "opus",
+            "--provider", "anthropic",
+            "--reasoning-effort", "high",
+        )
+
+    def test_falsy_optional_flags_are_omitted(self, monkeypatch):
+        fake = MagicMock(return_value=_ok())
+        monkeypatch.setattr(cron_tools, "run_hermes", fake)
+
+        cron_tools.cron_edit(job_id="t_abc", continuity=False)
+
+        fake.assert_called_once_with("cron", "edit", "t_abc")
+
+
 class TestCronLifecycle:
     def test_pause_targets_the_job_id(self, monkeypatch):
         fake = MagicMock(return_value=_ok())

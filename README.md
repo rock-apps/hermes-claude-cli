@@ -2,7 +2,7 @@
 
 A model provider plugin for [Hermes Agent](https://github.com/NousResearch/hermes-agent) that exposes the official `claude` CLI (Claude Code), authenticated with a **Claude Max subscription**, as a first-class provider — no HTTP bridge involved.
 
-> **Status**: implemented and validated end-to-end inside real Hermes Agent installs, including production. 106 tests in the plugin + 37 in [`mcp-bridge/`](./mcp-bridge/), `ruff`-clean. See [`docs/08-roadmap.md`](./docs/08-roadmap.md) for what shipped and what's still open, and [`CLAUDE.md`](./CLAUDE.md) for a maintainer-oriented summary.
+> **Status**: implemented and validated end-to-end inside real Hermes Agent installs, including production. 106 tests in the plugin + 41 in [`mcp-bridge/`](./mcp-bridge/), `ruff`-clean. See [`docs/08-roadmap.md`](./docs/08-roadmap.md) for what shipped and what's still open, and [`CLAUDE.md`](./CLAUDE.md) for a maintainer-oriented summary.
 
 ## Why
 

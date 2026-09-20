@@ -39,6 +39,7 @@ from hermes_mcp import cron_tools, kanban_tools
 _TOOLS = (
     cron_tools.cron_list,
     cron_tools.cron_create,
+    cron_tools.cron_edit,
     cron_tools.cron_pause,
     cron_tools.cron_resume,
     cron_tools.cron_remove,

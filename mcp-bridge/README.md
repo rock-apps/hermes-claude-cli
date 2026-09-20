@@ -30,7 +30,7 @@ Configure the **Hermes profile's own `.env`**:
 ```bash
 # .env (e.g. ~/.hermes/profiles/rockapps/.env)
 CLAUDE_CLI_MCP_CONFIG={"mcpServers":{"hermes-bridge-rockapps":{"command":"/absolute/path/to/mcp-bridge/.venv/bin/hermes-mcp-bridge","env":{"HERMES_MCP_PROFILE":"rockapps"}}}}
-CLAUDE_CLI_ALLOWED_TOOLS=mcp__hermes-bridge-rockapps__cron_list,mcp__hermes-bridge-rockapps__cron_create,mcp__hermes-bridge-rockapps__cron_pause,mcp__hermes-bridge-rockapps__cron_resume,mcp__hermes-bridge-rockapps__cron_remove,mcp__hermes-bridge-rockapps__cron_status,mcp__hermes-bridge-rockapps__kanban_list,mcp__hermes-bridge-rockapps__kanban_show,mcp__hermes-bridge-rockapps__kanban_create,mcp__hermes-bridge-rockapps__kanban_assign,mcp__hermes-bridge-rockapps__kanban_comment,mcp__hermes-bridge-rockapps__kanban_complete,mcp__hermes-bridge-rockapps__kanban_block
+CLAUDE_CLI_ALLOWED_TOOLS=mcp__hermes-bridge-rockapps__cron_list,mcp__hermes-bridge-rockapps__cron_create,mcp__hermes-bridge-rockapps__cron_edit,mcp__hermes-bridge-rockapps__cron_pause,mcp__hermes-bridge-rockapps__cron_resume,mcp__hermes-bridge-rockapps__cron_remove,mcp__hermes-bridge-rockapps__cron_status,mcp__hermes-bridge-rockapps__kanban_list,mcp__hermes-bridge-rockapps__kanban_show,mcp__hermes-bridge-rockapps__kanban_create,mcp__hermes-bridge-rockapps__kanban_assign,mcp__hermes-bridge-rockapps__kanban_comment,mcp__hermes-bridge-rockapps__kanban_complete,mcp__hermes-bridge-rockapps__kanban_block
 ```
 
 `CLAUDE_CLI_MCP_CONFIG` is passed straight through to `--mcp-config` (this plugin does no parsing of it). `CLAUDE_CLI_ALLOWED_TOOLS` is a comma-separated list this plugin turns into `--settings '{"permissions":{"allow":[...]}}'` itself — see [`../docs/05-configuration.md`](../docs/05-configuration.md).
@@ -81,6 +81,7 @@ Environment variables the bridge itself reads (distinct from the `CLAUDE_CLI_*` 
 |---|---|
 | `cron_list` | `hermes cron list [--all]` |
 | `cron_create` | `hermes cron create <schedule> [prompt] [--name] [--deliver] [--repeat] [--continuity] [--model] [--provider] [--reasoning-effort] [--paused]` |
+| `cron_edit` | `hermes cron edit <job_id> [--schedule] [--prompt] [--name] [--deliver] [--repeat] [--continuity] [--model] [--provider] [--reasoning-effort]` — edits in place, only the fields passed change. Prefer this over `cron_remove` + `cron_create` for changing a live job: recreating drops its `job_id` and execution history. |
 | `cron_pause` / `cron_resume` / `cron_remove` | `hermes cron pause/resume/remove <job_id>` |
 | `cron_status` | `hermes cron status` |
 | `kanban_list` | `hermes kanban list [--assignee] [--status] [--mine]` |
@@ -91,10 +92,12 @@ Environment variables the bridge itself reads (distinct from the `CLAUDE_CLI_*` 
 | `kanban_complete` | `hermes kanban complete <task_id> [--summary]` |
 | `kanban_block` | `hermes kanban block <task_id> <reason>` |
 
+**Known gap in the underlying `hermes` CLI, not fixable from this bridge**: there is no command anywhere in `hermes cron` that prints an existing job's current prompt text. `cron_list`/`cron_status`/`cron_runs`/`cron_doctor` all expose schedule/name/status/execution history, never the prompt — confirmed by reading every `hermes cron <subcommand> --help` (2026-09-20). Practical consequence: before calling `cron_edit(prompt=...)` or recreating a job, get the current wording from the user, a durable memory note, or an earlier conversation — there is no CLI call that will hand it back to you.
+
 ## Development
 
 ```bash
-.venv/bin/python -m pytest -q     # 37 tests, no real subprocess calls (subprocess.run is mocked)
+.venv/bin/python -m pytest -q     # 41 tests, no real subprocess calls (subprocess.run is mocked)
 .venv/bin/ruff check .
 ```
 

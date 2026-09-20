@@ -10,7 +10,7 @@ A model provider plugin for **[Hermes Agent](https://github.com/NousResearch/her
 
 ## Status
 
-Implemented and validated end-to-end, including against real production deployments and via `hermes plugins install`. 106 automated tests in the plugin (`pytest`, none call the real CLI) + 37 in `mcp-bridge/`, `ruff check` clean. Dev environment: local `.venv/` via `uv` (`python3 -m venv` doesn't work on this system — missing `python3-venv`).
+Implemented and validated end-to-end, including against real production deployments and via `hermes plugins install`. 106 automated tests in the plugin (`pytest`, none call the real CLI) + 41 in `mcp-bridge/`, `ruff check` clean. Dev environment: local `.venv/` via `uv` (`python3 -m venv` doesn't work on this system — missing `python3-venv`).
 
 ```
 cd /mnt/dev/projects-rk/hermes-claude-cli

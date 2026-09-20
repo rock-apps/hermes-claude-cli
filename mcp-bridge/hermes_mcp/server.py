@@ -14,6 +14,7 @@ from hermes_mcp._version import __version__
 _TOOLS = (
     cron_tools.cron_list,
     cron_tools.cron_create,
+    cron_tools.cron_edit,
     cron_tools.cron_pause,
     cron_tools.cron_resume,
     cron_tools.cron_remove,

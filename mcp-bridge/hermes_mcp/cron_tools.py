@@ -67,6 +67,50 @@ def cron_create(
     return run_hermes(*args).output
 
 
+def cron_edit(
+    job_id: str,
+    schedule: str = "",
+    prompt: str = "",
+    name: str = "",
+    deliver: str = "",
+    repeat: int | None = None,
+    continuity: bool = False,
+    model: str = "",
+    provider: str = "",
+    reasoning_effort: str = "",
+) -> str:
+    """Edit an existing recurring job in place — only the fields passed are
+    changed, everything else on the job is left untouched. Prefer this over
+    cron_remove + cron_create for any change to a job that's already running:
+    editing in place keeps its job_id and execution history, and recreating
+    silently drops it. Note: neither this bridge nor the underlying `hermes
+    cron` CLI can print a job's current prompt text (cron_list/cron_status/
+    cron_runs only expose schedule/name/status, never the prompt) — get the
+    current wording from the user, from a durable note, or from a prior
+    conversation before overwriting `prompt`.
+    """
+    args = ["cron", "edit", job_id]
+    if schedule:
+        args += ["--schedule", schedule]
+    if prompt:
+        args += ["--prompt", prompt]
+    if name:
+        args += ["--name", name]
+    if deliver:
+        args += ["--deliver", deliver]
+    if repeat is not None:
+        args += ["--repeat", str(repeat)]
+    if continuity:
+        args.append("--continuity")
+    if model:
+        args += ["--model", model]
+    if provider:
+        args += ["--provider", provider]
+    if reasoning_effort:
+        args += ["--reasoning-effort", reasoning_effort]
+    return run_hermes(*args).output
+
+
 def cron_pause(job_id: str) -> str:
     """Pause a scheduled job so it stops firing without deleting it."""
     return run_hermes("cron", "pause", job_id).output
