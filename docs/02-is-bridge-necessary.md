@@ -1,4 +1,4 @@
-# 04 — ADR: is an HTTP bridge necessary?
+# 02 — ADR: is an HTTP bridge necessary?
 
 **Status**: accepted and implemented.
 

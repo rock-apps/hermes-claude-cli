@@ -1,4 +1,4 @@
-# 06 — Reference: `claude` CLI flags this integration relies on
+# 04 — Reference: `claude` CLI flags this integration relies on
 
 Gathered from `claude --help` on the locally installed version (**Claude Code 2.1.276**). This version does **not** support the ACP protocol (`--acp`) the `copilot` CLI uses — there's no such flag in `claude --help`. That's why this integration uses the CLI's own native protocol (`--print` + `--output-format`), not JSON-RPC/ACP.
 

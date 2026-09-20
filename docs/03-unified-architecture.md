@@ -1,4 +1,4 @@
-# 05 — Architecture
+# 03 — Architecture
 
 ## Component diagram
 

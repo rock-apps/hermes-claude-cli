@@ -1,4 +1,4 @@
-# 07 — Configuration
+# 05 — Configuration
 
 Environment-variable surface for the plugin, implemented in `plugin/claude_cli/config.py`. Names are prefixed `CLAUDE_CLI_` to avoid colliding with variables the `claude` CLI itself already uses (`CLAUDE_BIN` is kept as a legacy fallback name).
 
@@ -26,6 +26,14 @@ There is no `CLAUDE_CLI_STREAM_MODE` (it was in the original plan, never impleme
 This was confirmed the hard way on a real deployment: `hermes -z -p <name> ...` (a standalone, non-multiplexed invocation) *does* load the named profile's own plugin copy and `.env` correctly — so a config change kept appearing "fixed" under that test while a real message through the gateway kept failing, until both copies were instrumented with a diagnostic log and only the `default` copy's line fired for a real routed turn. If your own testing only goes through `hermes -z`, it will not catch this — it needs a real message routed through the actual gateway (or `gateway.multiplex_profiles: false`, where each profile's own installed copy and `.env` genuinely run).
 
 A **non-multiplexed** deployment (single profile, or `gateway.multiplex_profiles: false`) does not have this caveat — each profile's own `.env` and plugin copy are what actually execute.
+
+## `hermes-webui` is a third, separate process — it needs its own restart too
+
+If the deployment also runs [`hermes-webui`](https://github.com/NousResearch/hermes-webui) (a browser UI, typically `~/hermes-webui/server.py`, managed by its own `ctl.sh`), it is **not** part of `hermes-gateway.service` and restarting the gateway does not touch it. `hermes-webui` runs as its own long-lived Python process — confirmed on a real deployment to stay up for multiple days across several gateway restarts — and it loads the `claude-cli-provider` plugin and its `.env` the same way any other long-running process does: once, at its own startup (or first use). Any change made while it's already running — a plugin reinstall, a `CLAUDE_CLI_MCP_CONFIG`/`CLAUDE_CLI_ALLOWED_TOOLS` edit, a gateway restart — is invisible to it until it is restarted too.
+
+**Symptom this produces**: a fresh conversation in the web UI reports it has no access to a bridge's tools (e.g. `hermes-bridge-<profile>`), or replies without ever streaming token-by-token, even though the exact same plugin/config change already works via `hermes -z` and via the messaging-platform gateway (Slack/Telegram/etc.). Confirmed empirically (2026-09-20, `muse`): the live `claude` subprocess for a web UI turn was missing `--mcp-config`/`--settings` entirely, and using `--output-format json` instead of `--output-format stream-json --include-partial-messages`, purely because `hermes-webui` had been running since before the plugin/config update — restarting it (`cd ~/hermes-webui && ./ctl.sh restart`) fixed both in the very next turn, no other change needed.
+
+**Practical rule**: after installing or updating this plugin, or after editing any `CLAUDE_CLI_*` variable, restart *every* long-running process that might have already loaded it — `hermes-gateway.service` **and** `hermes-webui`, independently. Restarting one does not restart the other.
 
 ## Subprocess environment (not a `CLAUDE_CLI_*` variable, but affects what the `claude` CLI sees)
 

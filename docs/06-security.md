@@ -1,4 +1,4 @@
-# 08 — Security
+# 06 — Security
 
 ## Threat model
 

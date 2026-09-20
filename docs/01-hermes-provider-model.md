@@ -1,4 +1,4 @@
-# 03 — How Hermes Agent actually handles providers
+# 01 — How Hermes Agent actually handles providers
 
 Source: real [`NousResearch/hermes-agent`](https://github.com/NousResearch/hermes-agent) code (`providers/base.py`, `providers/__init__.py`, `plugins/model-providers/copilot-acp/`, `agent/copilot_acp_client.py`, `website/docs/developer-guide/adding-providers.md`) — not third-party documentation. This is the piece of research the two original projects didn't have (or didn't apply).
 
