@@ -5,7 +5,6 @@ from __future__ import annotations
 import subprocess
 
 import pytest
-
 from hermes_mcp.runner import HermesResult, build_command, run_hermes
 
 

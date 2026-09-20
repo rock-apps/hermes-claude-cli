@@ -71,13 +71,27 @@ class CLIResult:
 
 @dataclass(frozen=True)
 class PermissionConfig:
-    """Permission-related flags for one `claude` invocation."""
+    """Permission-related flags for one `claude` invocation.
+
+    `mcp_config`/`extra_settings` are orthogonal to the bypass/restricted branching
+    below: `--restricted` (see docs/06) ignores ambient user/project/local settings
+    files, which means an MCP server registered ambiently via `claude mcp add
+    --scope user` is invisible to a restricted invocation, and any `permissions.allow`
+    entry meant to pre-approve a tool call is ignored too — confirmed empirically,
+    not inferred from `claude --help` alone. `--mcp-config`/`--settings`, passed
+    explicitly per invocation, are the documented exception that still applies even
+    under `--restricted`. Both are plain passthrough: `mcp_config` is a JSON string
+    or a file path (whatever `claude --mcp-config` itself accepts), `extra_settings`
+    likewise for `--settings`.
+    """
 
     bypass: bool = False
     mode: str | None = None
     prompts_none: bool = True
     restricted: bool = False
     allowed_dirs: tuple[str, ...] = field(default_factory=tuple)
+    mcp_config: str | None = None
+    extra_settings: str | None = None
 
 
 def build_args(
@@ -131,6 +145,11 @@ def build_args(
             args.append("--restricted")
         for directory in permissions.allowed_dirs:
             args += ["--add-dir", directory]
+
+    if permissions.mcp_config:
+        args += ["--mcp-config", permissions.mcp_config]
+    if permissions.extra_settings:
+        args += ["--settings", permissions.extra_settings]
 
     if max_budget_usd is not None:
         args += ["--max-budget-usd", str(max_budget_usd)]

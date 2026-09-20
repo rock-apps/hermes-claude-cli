@@ -27,6 +27,21 @@ client.py's tracking shows it's safe to (see session.py and docs/10-roadmap.md, 
 verified empirically, including the case of a `--resume` target the CLI no longer
 recognises. Kept configurable in case a deployment wants to rule the behavior out
 entirely rather than rely on the fallback.
+
+``CLAUDE_CLI_MCP_CONFIG`` / ``CLAUDE_CLI_ALLOWED_TOOLS`` (both unset by default, so
+restricted mode's own defaults are unchanged unless opted into): confirmed
+empirically that ``--restricted`` ignores ambient user/project/local settings —
+an MCP server registered via ``claude mcp add --scope user`` is invisible to a
+restricted invocation, and any ``permissions.allow`` entry meant to pre-approve a
+tool call is ignored too, so it gets silently denied under
+``--permission-prompts none`` with no error surfaced back through Hermes. See
+``mcp-bridge/README.md`` for a concrete worked example (Hermes' own cron/kanban
+CLI, exposed as MCP tools). ``CLAUDE_CLI_MCP_CONFIG`` is passed straight through
+to ``--mcp-config`` (a JSON string or a file path, whatever the CLI itself
+accepts). ``CLAUDE_CLI_ALLOWED_TOOLS`` is a comma-separated list of tool names,
+turned into a ``--settings '{"permissions": {"allow": [...]}}'`` JSON blob —
+both flags are the documented exception that still applies even under
+``--restricted``.
 """
 
 from __future__ import annotations
@@ -57,6 +72,8 @@ class ClaudeCLIConfig:
     max_budget_usd: float | None = None
     timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS
     session_continuity: bool = True
+    mcp_config: str | None = None
+    allowed_tools: tuple[str, ...] = field(default_factory=tuple)
 
 
 class ClaudeBinaryNotFoundError(RuntimeError):
@@ -100,6 +117,10 @@ def _parse_allowed_dirs(raw: str) -> tuple[str, ...]:
     return tuple(dirs)
 
 
+def _parse_allowed_tools(raw: str) -> tuple[str, ...]:
+    return tuple(part.strip() for part in raw.split(",") if part.strip())
+
+
 def _parse_bool(raw: str, *, default: bool) -> bool:
     normalized = raw.strip().lower()
     if not normalized:
@@ -130,4 +151,6 @@ def load_config(env: Mapping[str, str] | None = None) -> ClaudeCLIConfig:
         session_continuity=_parse_bool(
             resolved_env.get("CLAUDE_CLI_SESSION_CONTINUITY", ""), default=True
         ),
+        mcp_config=resolved_env.get("CLAUDE_CLI_MCP_CONFIG", "").strip() or None,
+        allowed_tools=_parse_allowed_tools(resolved_env.get("CLAUDE_CLI_ALLOWED_TOOLS", "")),
     )

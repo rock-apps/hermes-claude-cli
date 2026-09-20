@@ -228,6 +228,88 @@ class TestBuildArgs:
             "/b",
         ]
 
+    def test_mcp_config_is_passed_through_when_set(self) -> None:
+        # Arrange
+        permissions = PermissionConfig(restricted=True, mcp_config='{"mcpServers":{}}')
+
+        # Act
+        args = build_args(
+            model="sonnet",
+            system_prompt="",
+            prompt="hello",
+            permissions=permissions,
+        )
+
+        # Assert
+        assert "--mcp-config" in args
+        assert args[args.index("--mcp-config") + 1] == '{"mcpServers":{}}'
+
+    def test_mcp_config_is_omitted_when_not_set(self) -> None:
+        # Arrange
+        permissions = PermissionConfig(restricted=True)
+
+        # Act
+        args = build_args(
+            model="sonnet",
+            system_prompt="",
+            prompt="hello",
+            permissions=permissions,
+        )
+
+        # Assert
+        assert "--mcp-config" not in args
+
+    def test_extra_settings_is_passed_through_when_set(self) -> None:
+        # Arrange
+        permissions = PermissionConfig(restricted=True, extra_settings='{"permissions":{"allow":["x"]}}')
+
+        # Act
+        args = build_args(
+            model="sonnet",
+            system_prompt="",
+            prompt="hello",
+            permissions=permissions,
+        )
+
+        # Assert
+        assert "--settings" in args
+        assert args[args.index("--settings") + 1] == '{"permissions":{"allow":["x"]}}'
+
+    def test_extra_settings_is_omitted_when_not_set(self) -> None:
+        # Arrange
+        permissions = PermissionConfig(restricted=True)
+
+        # Act
+        args = build_args(
+            model="sonnet",
+            system_prompt="",
+            prompt="hello",
+            permissions=permissions,
+        )
+
+        # Assert
+        assert "--settings" not in args
+
+    def test_mcp_config_and_extra_settings_still_apply_under_bypass_permissions(self) -> None:
+        # Arrange: --dangerously-skip-permissions short-circuits the other permission
+        # flags (mode/prompts-none/restricted/allowed_dirs), but MCP visibility and
+        # settings are orthogonal to that branch and must still be threaded through.
+        permissions = PermissionConfig(
+            bypass=True, mcp_config='{"mcpServers":{}}', extra_settings='{"permissions":{}}',
+        )
+
+        # Act
+        args = build_args(
+            model="sonnet",
+            system_prompt="",
+            prompt="hello",
+            permissions=permissions,
+        )
+
+        # Assert
+        assert "--mcp-config" in args
+        assert "--settings" in args
+
     def test_max_budget_usd_appends_flag_with_str_value(self) -> None:
         # Arrange
         permissions = PermissionConfig()

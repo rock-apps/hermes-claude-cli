@@ -17,6 +17,7 @@ transparently.
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 import uuid
@@ -64,12 +65,19 @@ def _effective_timeout(timeout: Any, default: float) -> float:
 
 
 def _permissions_for(config: ClaudeCLIConfig) -> PermissionConfig:
+    extra_settings = (
+        json.dumps({"permissions": {"allow": list(config.allowed_tools)}})
+        if config.allowed_tools
+        else None
+    )
     return PermissionConfig(
         bypass=False,
         mode=config.permission_mode,
         prompts_none=True,
         restricted=config.restricted,
         allowed_dirs=config.allowed_dirs,
+        mcp_config=config.mcp_config,
+        extra_settings=extra_settings,
     )
 
 

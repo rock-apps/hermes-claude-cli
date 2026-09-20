@@ -8,7 +8,7 @@ The `claude` CLI accepts no per-request tool schemas from its caller — Hermes'
 
 The `claude` CLI *does* support persistently configured MCP servers (`claude mcp add`), independent of per-request tool passthrough. This package is that: a small MCP server, backed entirely by shelling out to the already-existing `hermes cron`/`hermes kanban` CLI commands (not Hermes' internal Python APIs — those aren't a supported external interface), that gives a `claude-cli`-backed conversation real access to scheduling and cross-profile task delegation, without leaving the Max-subscription OAuth path.
 
-Confirmed working end-to-end (2026-09-19, local dev machine): registered via `claude mcp add`, `auth status` showing `authMethod: claude.ai` / `subscriptionType: max` / no `ANTHROPIC_API_KEY` set, `claude -p` successfully calling `cron_status`, `cron_list`, and `kanban_create` and getting real results back from a live Hermes install.
+Confirmed working end-to-end against this plugin's *actual* invocation shape (2026-09-19, local dev machine and `muse` production deployment): `auth status` showing `authMethod: claude.ai` / `subscriptionType: max` / no `ANTHROPIC_API_KEY` set, `claude -p --restricted --permission-prompts none --mcp-config ... --settings ...` (exactly what `client.py`/`process.py` build) successfully calling `cron_status`, `cron_list`, and `kanban_create`, `permission_denials: []` in the raw JSON result.
 
 ## What it does NOT solve
 
@@ -21,57 +21,29 @@ cd mcp-bridge
 uv venv .venv && uv pip install --python .venv/bin/python -e .
 ```
 
-## Register with the `claude` CLI
+## Register with this plugin — NOT `claude mcp add` alone
 
-For the **default** Hermes profile:
+`claude mcp add --scope user` looks like the natural way to register this server, and it works fine for an interactive `claude` session. **It does not work for this plugin.** `CLAUDE_CLI_RESTRICTED` defaults to `true`, which passes `--restricted` — and `--restricted`'s own `--help` text says it "ignores user, project and local settings files." Confirmed empirically (2026-09-19, `muse`): an MCP server registered via `claude mcp add --scope user` is **completely invisible** to a `--restricted` invocation — not merely permission-denied, the model reports zero tools with "hermes" or "bridge" in the name at all. The one documented exception is passing `--mcp-config`/`--settings` explicitly per invocation, which `--restricted` does not ignore — so that's what this plugin does, via two config env vars wired straight into `process.build_args()`.
 
-```bash
-claude mcp add hermes-bridge --scope user -- "$(pwd)/.venv/bin/hermes-mcp-bridge"
-```
-
-For a **named** profile (every action runs as `hermes -p <profile> ...`):
+Configure the **Hermes profile's own `.env`** (not `claude mcp add`):
 
 ```bash
-claude mcp add hermes-bridge --scope user -e HERMES_MCP_PROFILE=rockapps -- "$(pwd)/.venv/bin/hermes-mcp-bridge"
+# .env for the target Hermes profile (e.g. ~/.hermes/profiles/rockapps/.env)
+CLAUDE_CLI_MCP_CONFIG={"mcpServers":{"hermes-bridge-rockapps":{"command":"/absolute/path/to/mcp-bridge/.venv/bin/hermes-mcp-bridge","env":{"HERMES_MCP_PROFILE":"rockapps"}}}}
+CLAUDE_CLI_ALLOWED_TOOLS=mcp__hermes-bridge-rockapps__cron_list,mcp__hermes-bridge-rockapps__cron_create,mcp__hermes-bridge-rockapps__cron_pause,mcp__hermes-bridge-rockapps__cron_resume,mcp__hermes-bridge-rockapps__cron_remove,mcp__hermes-bridge-rockapps__cron_status,mcp__hermes-bridge-rockapps__kanban_list,mcp__hermes-bridge-rockapps__kanban_show,mcp__hermes-bridge-rockapps__kanban_create,mcp__hermes-bridge-rockapps__kanban_assign,mcp__hermes-bridge-rockapps__kanban_comment,mcp__hermes-bridge-rockapps__kanban_complete,mcp__hermes-bridge-rockapps__kanban_block
 ```
 
-`--scope user` registers it globally for the current OS user (every `claude` invocation, from any directory, sees it) — this matters because this plugin's subprocess spawns don't currently pass a per-profile `cwd`, so `--scope local`/`project` (directory-scoped) isn't a way to get per-profile isolation today. If you need *different* Hermes profiles to see *different* MCP-bridge configuration (e.g. one pinned to `rockapps`, another to `erick`), register the bridge under **different tool names** (`claude mcp add hermes-bridge-rockapps ... -e HERMES_MCP_PROFILE=rockapps`, `claude mcp add hermes-bridge-erick ... -e HERMES_MCP_PROFILE=erick`) and tell each profile's system prompt which one to use — there's no way today for the bridge to auto-detect which profile is asking.
+`CLAUDE_CLI_MCP_CONFIG` is passed straight through to `--mcp-config` (this plugin does no parsing of it). `CLAUDE_CLI_ALLOWED_TOOLS` is a comma-separated list this plugin turns into `--settings '{"permissions":{"allow":[...]}}'` itself — see [`../docs/07-configuration.md`](../docs/07-configuration.md). Restart the profile's gateway after editing `.env`.
 
-Environment variables the bridge itself reads (set via `claude mcp add -e KEY=value`):
+**Security implication, explicit on purpose**: `CLAUDE_CLI_ALLOWED_TOOLS` pre-approves *write* actions too (`cron_create`, `cron_remove`, `kanban_complete`, ...) — the model can create/delete scheduled jobs and complete/block kanban tasks from a chat message with no human approval step. That's the whole point of building this bridge, but it's worth being deliberate about which tool names go in that list rather than pasting the full set above without reading it. For read-only access, only include `cron_list`/`cron_status`/`kanban_list`/`kanban_show`.
+
+**Per-profile isolation**: give each Hermes profile that needs this its own `.env` entries above, with a distinct MCP server name (`hermes-bridge-<profile>`) and `HERMES_MCP_PROFILE=<profile>` in the `env` block, matched by that same profile's `CLAUDE_CLI_ALLOWED_TOOLS`. Since each Hermes profile has its own isolated `.env`, this gives real per-profile isolation — unlike the `claude mcp add --scope user` approach this replaces, which is shared OS-user-wide and wouldn't have worked anyway.
+
+Environment variables the bridge itself reads (distinct from the `CLAUDE_CLI_*` ones above, which belong to this repo's `plugin/`, not to `mcp-bridge/`):
 
 | Variable | Purpose | Default |
 |---|---|---|
-| `HERMES_MCP_PROFILE` | Appends `-p <profile>` to every `hermes` call this bridge makes. | unset — targets the default profile |
-
-## Required extra step: pre-approve the tools
-
-This plugin runs `claude -p` with `--permission-prompts none` (deliberately — see the main [README](../README.md#project-conventions): it answers chat messages, it doesn't act as an unattended agent that can prompt a human). Any tool call that would need approval — which MCP tools do by default, even ones you yourself registered with `claude mcp add` — is **silently denied** in that mode, with no error surfaced back through the chat. Confirmed directly: a `cron_status` call was denied until this step was done, with `claude`'s own output reading "the call was blocked ... denied automatically."
-
-Add every tool name to `permissions.allow` in `~/.claude/settings.json` (the same OS user your Hermes gateway runs as), matching the server name you registered:
-
-```json
-{
-  "permissions": {
-    "allow": [
-      "mcp__hermes-bridge-rockapps__cron_list",
-      "mcp__hermes-bridge-rockapps__cron_create",
-      "mcp__hermes-bridge-rockapps__cron_pause",
-      "mcp__hermes-bridge-rockapps__cron_resume",
-      "mcp__hermes-bridge-rockapps__cron_remove",
-      "mcp__hermes-bridge-rockapps__cron_status",
-      "mcp__hermes-bridge-rockapps__kanban_list",
-      "mcp__hermes-bridge-rockapps__kanban_show",
-      "mcp__hermes-bridge-rockapps__kanban_create",
-      "mcp__hermes-bridge-rockapps__kanban_assign",
-      "mcp__hermes-bridge-rockapps__kanban_comment",
-      "mcp__hermes-bridge-rockapps__kanban_complete",
-      "mcp__hermes-bridge-rockapps__kanban_block"
-    ]
-  }
-}
-```
-
-**Security implication, explicit on purpose**: this pre-approves *write* actions too (`cron_create`, `cron_remove`, `kanban_complete`, ...) — the model can create/delete scheduled jobs and complete/block kanban tasks from a chat message with no human approval step, same as it already can edit files or run allowlisted `Bash` commands in this same settings file. That's the whole point of building this bridge, but it's worth being deliberate about rather than pasting the block above without reading it. If you only want read access, pre-approve only `cron_list`/`cron_status`/`kanban_list`/`kanban_show` and leave the rest to prompt (which, under `--permission-prompts none`, means they'll just be denied rather than actually asking anyone).
+| `HERMES_MCP_PROFILE` | Appends `-p <profile>` to every `hermes` call this bridge makes. Set it in the `env` block of `CLAUDE_CLI_MCP_CONFIG` above. | unset — targets the default profile |
 | `HERMES_MCP_BIN` | Path to the `hermes` binary, if not on `PATH`. | `hermes` |
 
 ## Tools exposed

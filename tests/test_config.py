@@ -75,6 +75,47 @@ def test_load_config_uses_documented_defaults(monkeypatch) -> None:
     assert config.restricted is True
     assert config.max_budget_usd is None
     assert config.timeout_seconds == 300.0
+    assert config.mcp_config is None
+    assert config.allowed_tools == ()
+
+
+def test_load_config_reads_mcp_config_as_a_raw_passthrough_string(monkeypatch) -> None:
+    # Arrange
+    monkeypatch.setattr(
+        "plugin.claude_cli.config.find_claude_binary", lambda env: "/usr/bin/claude"
+    )
+
+    # Act
+    config = load_config({"CLAUDE_CLI_MCP_CONFIG": '{"mcpServers":{"x":{"command":"y"}}}'})
+
+    # Assert
+    assert config.mcp_config == '{"mcpServers":{"x":{"command":"y"}}}'
+
+
+def test_load_config_parses_comma_separated_allowed_tools(monkeypatch) -> None:
+    # Arrange
+    monkeypatch.setattr(
+        "plugin.claude_cli.config.find_claude_binary", lambda env: "/usr/bin/claude"
+    )
+
+    # Act
+    config = load_config({"CLAUDE_CLI_ALLOWED_TOOLS": "mcp__x__a, mcp__x__b ,mcp__x__c"})
+
+    # Assert
+    assert config.allowed_tools == ("mcp__x__a", "mcp__x__b", "mcp__x__c")
+
+
+def test_load_config_blank_allowed_tools_entries_are_dropped(monkeypatch) -> None:
+    # Arrange
+    monkeypatch.setattr(
+        "plugin.claude_cli.config.find_claude_binary", lambda env: "/usr/bin/claude"
+    )
+
+    # Act
+    config = load_config({"CLAUDE_CLI_ALLOWED_TOOLS": "mcp__x__a,, ,mcp__x__b"})
+
+    # Assert
+    assert config.allowed_tools == ("mcp__x__a", "mcp__x__b")
 
 
 def test_load_config_allows_disabling_restricted_mode(monkeypatch) -> None:
@@ -104,6 +145,8 @@ def test_load_config_reads_every_env_var(monkeypatch, tmp_path) -> None:
         "CLAUDE_CLI_RESTRICTED": "true",
         "CLAUDE_CLI_MAX_BUDGET_USD": "2.5",
         "CLAUDE_CLI_TIMEOUT_SECONDS": "60",
+        "CLAUDE_CLI_MCP_CONFIG": '{"mcpServers":{}}',
+        "CLAUDE_CLI_ALLOWED_TOOLS": "mcp__x__a,mcp__x__b",
     }
 
     # Act
@@ -116,6 +159,8 @@ def test_load_config_reads_every_env_var(monkeypatch, tmp_path) -> None:
     assert config.restricted is True
     assert config.max_budget_usd == 2.5
     assert config.timeout_seconds == 60.0
+    assert config.mcp_config == '{"mcpServers":{}}'
+    assert config.allowed_tools == ("mcp__x__a", "mcp__x__b")
 
 
 def test_load_config_drops_nonexistent_allowed_dirs(monkeypatch, tmp_path) -> None:

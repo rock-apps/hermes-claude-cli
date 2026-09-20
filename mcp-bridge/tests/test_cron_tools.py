@@ -5,7 +5,6 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-
 from hermes_mcp import cron_tools
 from hermes_mcp.runner import HermesResult
 

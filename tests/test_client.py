@@ -7,9 +7,14 @@ real `claude` subprocess (already covered by tests/test_process.py).
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
-from plugin.claude_cli.client import ClaudeCLIClient, _effective_timeout
+from plugin.claude_cli.client import (
+    ClaudeCLIClient,
+    _effective_timeout,
+    _permissions_for,
+)
 from plugin.claude_cli.config import ClaudeCLIConfig
 from plugin.claude_cli.process import CLIResult, StreamChunk
 
@@ -421,6 +426,55 @@ def test_create_chat_completion_forwards_a_filtered_subprocess_env(monkeypatch) 
     # Assert
     assert seen_envs[0] is not None
     assert "ANTHROPIC_API_KEY" not in seen_envs[0]
+
+
+class TestPermissionsFor:
+    """`_permissions_for` translates `ClaudeCLIConfig` into a `PermissionConfig` —
+    exercised directly since it's the only place `allowed_tools` becomes the
+    `--settings` JSON blob `build_args` passes through."""
+
+    def test_mcp_config_passes_through_unchanged(self) -> None:
+        # Arrange
+        config = _make_config(mcp_config='{"mcpServers":{"x":{"command":"y"}}}')
+
+        # Act
+        permissions = _permissions_for(config)
+
+        # Assert
+        assert permissions.mcp_config == '{"mcpServers":{"x":{"command":"y"}}}'
+
+    def test_no_mcp_config_leaves_it_unset(self) -> None:
+        # Arrange
+        config = _make_config()
+
+        # Act
+        permissions = _permissions_for(config)
+
+        # Assert
+        assert permissions.mcp_config is None
+
+    def test_allowed_tools_become_a_settings_permissions_allow_json_blob(self) -> None:
+        # Arrange
+        config = _make_config(allowed_tools=("mcp__x__a", "mcp__x__b"))
+
+        # Act
+        permissions = _permissions_for(config)
+
+        # Assert
+        assert permissions.extra_settings is not None
+        assert json.loads(permissions.extra_settings) == {
+            "permissions": {"allow": ["mcp__x__a", "mcp__x__b"]}
+        }
+
+    def test_no_allowed_tools_leaves_extra_settings_unset(self) -> None:
+        # Arrange
+        config = _make_config()
+
+        # Act
+        permissions = _permissions_for(config)
+
+        # Assert
+        assert permissions.extra_settings is None
 
 
 class TestSessionContinuity:
