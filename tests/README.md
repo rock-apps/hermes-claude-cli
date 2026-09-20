@@ -17,4 +17,4 @@ cd /mnt/dev/projects-rk/hermes-claude-cli
 .venv/bin/python -m pytest -q
 ```
 
-A real, manual smoke test (not automated, to avoid spending subscription usage on every suite run) is documented in `../docs/10-roadmap.md`.
+A real, manual smoke test (not automated, to avoid spending subscription usage on every suite run) is documented in `../docs/08-roadmap.md`.

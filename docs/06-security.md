@@ -10,7 +10,7 @@
 | Shell execution (Bash) | `claude` has the Bash tool available by default — a headless provider could let the model run arbitrary shell commands as a side effect of an ordinary chat call, unnoticed. | `CLAUDE_CLI_RESTRICTED` defaults to `true` — `--restricted` (drops Bash/PowerShell/REPL/WebFetch) is on by default. Confirmed empirically: doesn't break normal chat, and does block an explicit attempt to invoke Bash ("I don't have access to a Bash tool in this session"). Set `CLAUDE_CLI_RESTRICTED=false` for a deployment that wants the provider to act as a full agent. |
 | Environment leakage | A subprocess inherits the parent's full environment unless filtered. | `process.build_subprocess_env()` is an allowlist (deny by default): only `HOME`, `PATH`, `LANG`/`LC_*`, `TERM`, `TMPDIR`, `USER`, `LOGNAME`, `SHELL` reach the subprocess — everything else from Hermes' environment is dropped. |
 | **`ANTHROPIC_API_KEY` overrides OAuth/Max auth** | Confirmed empirically: if `ANTHROPIC_API_KEY` is present in the parent process's environment (e.g. because Hermes' own `anthropic` provider needs it) and reaches the `claude` subprocess, the CLI warns "another auth source is set and takes precedence over your claude.ai login" and tries to bill against that key instead of the Max subscription — silently defeating the entire point of this plugin. | This is *why* the environment filter above is an allowlist rather than a blocklist: a blocklist would have to guess `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, and every future Anthropic-specific variable. Tested with a deliberately invalid key in the parent env: without the fix the call hangs/errors; with it, OAuth is used normally. |
-| Uncontrolled spend | No cap by default. | `--max-budget-usd` is available natively (see [06](./06-claude-cli-reference.md)) and exposed as `CLAUDE_CLI_MAX_BUDGET_USD`, though unset by default (no cap). |
+| Uncontrolled spend | No cap by default. | `--max-budget-usd` is available natively (see [04](./04-claude-cli-reference.md)) and exposed as `CLAUDE_CLI_MAX_BUDGET_USD`, though unset by default (no cap). |
 
 ## Permission-mode default
 
@@ -21,7 +21,7 @@
 
 `PermissionConfig.bypass` (`--dangerously-skip-permissions`) still exists in `process.py` for a deployment that explicitly wants full-agent behavior, but there's no environment variable exposed for it — it's opt-in only by editing `client.py` directly, deliberately more friction than a plain env-var toggle would give.
 
-**Under a multiplexed gateway, note that `CLAUDE_CLI_*` config (including any MCP bridge registered via `CLAUDE_CLI_MCP_CONFIG`/`CLAUDE_CLI_ALLOWED_TOOLS`) is shared by every profile using `claude-cli`** — see [07-configuration.md](./07-configuration.md#multiplexed-gateways-env-must-be-the-default-profiles). A bridge or elevated permission set meant for one profile is reachable, and acts as that profile, from any other profile's `claude-cli` turns on the same multiplexed gateway.
+**Under a multiplexed gateway, note that `CLAUDE_CLI_*` config (including any MCP bridge registered via `CLAUDE_CLI_MCP_CONFIG`/`CLAUDE_CLI_ALLOWED_TOOLS`) is shared by every profile using `claude-cli`** — see [05-configuration.md](./05-configuration.md#multiplexed-gateways-env-must-be-the-default-profiles). A bridge or elevated permission set meant for one profile is reachable, and acts as that profile, from any other profile's `claude-cli` turns on the same multiplexed gateway.
 
 ## `--add-dir` swallowing the prompt (fixed)
 
@@ -35,4 +35,4 @@ Tested empirically: the `claude` CLI does **not** redact secrets from files when
 
 - Path confinement (`_ensure_path_within_cwd` in the reference `copilot_acp_client.py` is a reasonable model) if this plugin ever needs to manipulate externally-supplied paths before passing them to the CLI.
 - Log auditing: worth logging `model`, message count, and tool count per request for observability, without ever logging full prompt content (may contain sensitive user data).
-- Concurrency around session continuity (Fase 4, `--resume`): the lock in `client.py` protects state read/write, but the CLI's own behavior under two genuinely concurrent calls resuming the same session hasn't been tested against a real race — see [10-roadmap.md](./10-roadmap.md).
+- Concurrency around session continuity (Fase 4, `--resume`): the lock in `client.py` protects state read/write, but the CLI's own behavior under two genuinely concurrent calls resuming the same session hasn't been tested against a real race — see [08-roadmap.md](./08-roadmap.md).

@@ -4,7 +4,7 @@ An MCP server that exposes Hermes Agent's own `cron` and `kanban` CLI subcommand
 
 ## Why this exists
 
-The `claude` CLI accepts no per-request tool schemas from its caller — Hermes' native tools (`cronjob_manage`, `kanban_create`, `delegate_task`, etc.) are only exposed to a model via the OpenAI-style `tools:` request field, which never reaches a `claude -p` subprocess. See [`../docs/06-claude-cli-reference.md`](../docs/06-claude-cli-reference.md#what-the-cli-still-cant-do-true-regardless-of-architecture) for the full limitation.
+The `claude` CLI accepts no per-request tool schemas from its caller — Hermes' native tools (`cronjob_manage`, `kanban_create`, `delegate_task`, etc.) are only exposed to a model via the OpenAI-style `tools:` request field, which never reaches a `claude -p` subprocess. See [`../docs/04-claude-cli-reference.md`](../docs/04-claude-cli-reference.md#what-the-cli-still-cant-do-true-regardless-of-architecture) for the full limitation.
 
 The `claude` CLI *does* support persistently configured MCP servers (`claude mcp add`), independent of per-request tool passthrough. This package is that: a small MCP server, backed entirely by shelling out to the already-existing `hermes cron`/`hermes kanban` CLI commands (not Hermes' internal Python APIs — those aren't a supported external interface), that gives a `claude-cli`-backed conversation real access to scheduling and cross-profile task delegation, without leaving the Max-subscription OAuth path.
 
@@ -33,7 +33,7 @@ CLAUDE_CLI_MCP_CONFIG={"mcpServers":{"hermes-bridge-rockapps":{"command":"/absol
 CLAUDE_CLI_ALLOWED_TOOLS=mcp__hermes-bridge-rockapps__cron_list,mcp__hermes-bridge-rockapps__cron_create,mcp__hermes-bridge-rockapps__cron_pause,mcp__hermes-bridge-rockapps__cron_resume,mcp__hermes-bridge-rockapps__cron_remove,mcp__hermes-bridge-rockapps__cron_status,mcp__hermes-bridge-rockapps__kanban_list,mcp__hermes-bridge-rockapps__kanban_show,mcp__hermes-bridge-rockapps__kanban_create,mcp__hermes-bridge-rockapps__kanban_assign,mcp__hermes-bridge-rockapps__kanban_comment,mcp__hermes-bridge-rockapps__kanban_complete,mcp__hermes-bridge-rockapps__kanban_block
 ```
 
-`CLAUDE_CLI_MCP_CONFIG` is passed straight through to `--mcp-config` (this plugin does no parsing of it). `CLAUDE_CLI_ALLOWED_TOOLS` is a comma-separated list this plugin turns into `--settings '{"permissions":{"allow":[...]}}'` itself — see [`../docs/07-configuration.md`](../docs/07-configuration.md).
+`CLAUDE_CLI_MCP_CONFIG` is passed straight through to `--mcp-config` (this plugin does no parsing of it). `CLAUDE_CLI_ALLOWED_TOOLS` is a comma-separated list this plugin turns into `--settings '{"permissions":{"allow":[...]}}'` itself — see [`../docs/05-configuration.md`](../docs/05-configuration.md).
 
 **⚠️ Under a multiplexed gateway (`gateway.multiplex_profiles: true`, the default for multi-profile Hermes installs), this `.env` MUST be the `default` profile's — `~/.hermes/.env`, not `~/.hermes/profiles/<name>/.env` — regardless of which named profile you actually want this to serve.**
 

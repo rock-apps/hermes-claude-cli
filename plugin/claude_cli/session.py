@@ -2,7 +2,7 @@
 session instead of re-sending the full flattened conversation history.
 
 No subprocess/I/O here — see client.py for how this plugs into an actual call, and
-../../docs/10-roadmap.md (Fase 4) for the empirical findings that justify this
+../../docs/08-roadmap.md (Fase 4) for the empirical findings that justify this
 design: a `ClaudeCLIClient` instance is reused by Hermes across the turns of one
 conversation (as long as its construction kwargs don't change), so per-instance
 state is a safe place to track "what did I last send, and under what claude

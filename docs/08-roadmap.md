@@ -53,9 +53,9 @@ Session continuity (Fase 4) composes with this correctly: `_run_turn_streaming()
 Real E2E proof (no mocks): incremental text deltas received one at a time via a live `ClaudeCLIClient.chat.completions.create(stream=True)` call, and a full two-turn session-continuity + streaming conversation (turn 1 "my favorite number is 12"; turn 2, streamed, resumed, only the delta sent → "15"). 13 new tests (`TestRunStreaming` in `test_process.py`, 4 new streaming tests in `test_client.py` replacing the now-obsolete `completion_to_stream_chunks` mock test), suite at 94, `ruff` clean.
 
 **Fase 3 — security hardening.**
-- Permission mode and `--restricted` defaults resolved (see [08-security.md](./08-security.md)).
+- Permission mode and `--restricted` defaults resolved (see [06-security.md](./06-security.md)).
 - Subprocess environment allowlist (`process.build_subprocess_env()`): only `HOME`, `PATH`, `LANG`/`LC_*`, `TERM`, `TMPDIR`, `USER`, `LOGNAME`, `SHELL` pass through. Found in the process: a leaked `ANTHROPIC_API_KEY` silently overrides OAuth/Max auth and makes the CLI try to bill against that key instead — confirmed empirically, this is why the filter is an allowlist rather than a blocklist.
-- Sensitive-content redaction: evaluated and deliberately not implemented — see [08-security.md](./08-security.md) for why.
+- Sensitive-content redaction: evaluated and deliberately not implemented — see [06-security.md](./06-security.md) for why.
 - Real bug found and fixed: `--add-dir` is a variadic CLI flag; without a `--` separator, a prompt not starting with `-` was silently swallowed as one more directory whenever `CLAUDE_CLI_ALLOWED_DIRS` was set, failing with "Input must be provided...". Fixed by always inserting `--` before the prompt.
 - Open: no default cap for `--max-budget-usd` (unset = unlimited) — a posture choice, not a bug.
 
@@ -76,8 +76,8 @@ Deliberately out of scope: no cross-process persistence (tracking is per-`Claude
 
 ## Fase 6 (optional, on demand): dual HTTP mode
 
-Only relevant if a real need appears to reuse this plugin's logic from tools outside Hermes (Open WebUI, Cursor, etc.). See the rejected alternative in [04-is-bridge-necessary.md](./04-is-bridge-necessary.md#alternative-considered-and-rejected). Not built preemptively.
+Only relevant if a real need appears to reuse this plugin's logic from tools outside Hermes (Open WebUI, Cursor, etc.). See the rejected alternative in [02-is-bridge-necessary.md](./02-is-bridge-necessary.md#alternative-considered-and-rejected). Not built preemptively.
 
 ## Permanently out of scope
 
-`model-router` and `zai-proxy` (routing the Claude Code CLI's own model backend to DeepSeek/z.ai) — see [09-scope-and-migration.md](./09-scope-and-migration.md). If ever wanted, it's a separate project, not part of this plugin.
+`model-router` and `zai-proxy` (routing the Claude Code CLI's own model backend to DeepSeek/z.ai) — see [07-scope-and-migration.md](./07-scope-and-migration.md). If ever wanted, it's a separate project, not part of this plugin.

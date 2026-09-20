@@ -3,7 +3,7 @@
 
 Mirrors the minimal surface of Hermes Agent's own reference subprocess-backed
 provider client (agent/copilot_acp_client.py, used by the bundled `copilot-acp`
-provider) — see ../../docs/03-hermes-provider-model.md. No HTTP is involved
+provider) — see ../../docs/01-hermes-provider-model.md. No HTTP is involved
 anywhere in this module: every call spawns and waits on a `claude` subprocess.
 
 Streaming (`stream=True`) delivers real incremental text/reasoning as `claude`
@@ -11,7 +11,7 @@ produces it (`--output-format stream-json --include-partial-messages`), verified
 against a real invocation — see `process.run_streaming`. Passing `tools`/
 `tool_choice` is accepted for interface compatibility but has no effect: the
 `claude` CLI does not accept externally-defined tool schemas (see
-../../docs/06-claude-cli-reference.md); it always uses its own built-in tools
+../../docs/04-claude-cli-reference.md); it always uses its own built-in tools
 transparently.
 """
 
@@ -126,7 +126,7 @@ class ClaudeCLIClient:
         self.chat = SimpleNamespace(
             completions=SimpleNamespace(create=self._create_chat_completion)
         )
-        # Session-continuity tracking (Fase 4, docs/10-roadmap.md). Scoped to this
+        # Session-continuity tracking (Fase 4, docs/08-roadmap.md). Scoped to this
         # instance deliberately: Hermes reuses one ClaudeCLIClient across the turns
         # of a conversation (as long as its construction kwargs don't change), so
         # instance state is a safe place for this. A lock guards it because Hermes

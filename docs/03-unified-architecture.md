@@ -83,7 +83,7 @@ The `providers`/`providers.base` imports are guarded with `try/except ImportErro
 
 ### `client.py` — `ClaudeCLIClient`
 
-Mirrors `CopilotACPClient`'s minimal surface (see [03](./03-hermes-provider-model.md)):
+Mirrors `CopilotACPClient`'s minimal surface (see [01](./01-hermes-provider-model.md)):
 - `.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create_chat_completion))`
 - `HERMES_SKIP_TRANSPORT_WRAP = True` — tells Hermes not to re-wrap this client in its generic HTTP transport.
 - `close()` is a no-op (Hermes calls it unconditionally on cleanup; each call here is already self-contained).
@@ -97,7 +97,7 @@ Pure translation functions, no I/O: `flatten_messages()` (system prompt + transc
 
 ### `process.py`
 
-`build_args()` builds the CLI argv (always ends with `-- <prompt>`, a deliberate separator — `--add-dir` is variadic and would otherwise swallow a prompt that doesn't start with `-`, see [08-security.md](./08-security.md)). `run_once()` runs `claude` via `subprocess.run(..., check=False)` and always tries `json.loads()` on stdout first, regardless of exit code — the CLI reports its own API-level errors (bad model, etc.) inside a well-formed JSON payload with `is_error: true`, not via a non-JSON crash. `run_streaming()` does the streaming equivalent over a `Popen` pipe, one JSON event per line — see the streaming note below. `build_subprocess_env()` is the allowlist described in [08-security.md](./08-security.md).
+`build_args()` builds the CLI argv (always ends with `-- <prompt>`, a deliberate separator — `--add-dir` is variadic and would otherwise swallow a prompt that doesn't start with `-`, see [06-security.md](./06-security.md)). `run_once()` runs `claude` via `subprocess.run(..., check=False)` and always tries `json.loads()` on stdout first, regardless of exit code — the CLI reports its own API-level errors (bad model, etc.) inside a well-formed JSON payload with `is_error: true`, not via a non-JSON crash. `run_streaming()` does the streaming equivalent over a `Popen` pipe, one JSON event per line — see the streaming note below. `build_subprocess_env()` is the allowlist described in [06-security.md](./06-security.md).
 
 ### `session.py`
 
@@ -105,7 +105,7 @@ Pure translation functions, no I/O: `flatten_messages()` (system prompt + transc
 
 ## Streaming: what's actually implemented
 
-`stream=True` delivers real incremental text via `process.run_streaming()`, which runs `claude` with `--output-format stream-json --include-partial-messages --verbose` and yields a `StreamChunk` per `content_block_delta` event (`text_delta` → `StreamChunk.text_delta`, `thinking_delta` on extended-thinking models → `StreamChunk.reasoning_delta`), plus one final chunk carrying the same `CLIResult` a non-streaming call would get. This was initially skipped — Hermes' own bundled `copilot_acp_client.py` reference doesn't do real incremental streaming for its subprocess provider either, so `stream=True` first just replayed one finished completion as a single fake chunk — but got built after all once real usage showed the cost of that shortcut (Hermes' UI shows "no stream output" with zero feedback for the entire duration of a `claude` call, indistinguishable from a hang). See Fase 2 in [10-roadmap.md](./10-roadmap.md) for the full story, including a real `--verbose`-requirement bug caught while building this.
+`stream=True` delivers real incremental text via `process.run_streaming()`, which runs `claude` with `--output-format stream-json --include-partial-messages --verbose` and yields a `StreamChunk` per `content_block_delta` event (`text_delta` → `StreamChunk.text_delta`, `thinking_delta` on extended-thinking models → `StreamChunk.reasoning_delta`), plus one final chunk carrying the same `CLIResult` a non-streaming call would get. This was initially skipped — Hermes' own bundled `copilot_acp_client.py` reference doesn't do real incremental streaming for its subprocess provider either, so `stream=True` first just replayed one finished completion as a single fake chunk — but got built after all once real usage showed the cost of that shortcut (Hermes' UI shows "no stream output" with zero feedback for the entire duration of a `claude` call, indistinguishable from a hang). See Fase 2 in [08-roadmap.md](./08-roadmap.md) for the full story, including a real `--verbose`-requirement bug caught while building this.
 
 ## No `scripts/reload.sh` / systemd equivalent, and why
 

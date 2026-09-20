@@ -1,6 +1,6 @@
 """Environment-variable configuration for the claude-cli provider plugin.
 
-Full configuration surface is documented in ../../docs/07-configuration.md. There is no
+Full configuration surface is documented in ../../docs/05-configuration.md. There is no
 hardcoded list of personal directories — see ``CLAUDE_CLI_ALLOWED_DIRS`` below.
 
 ``CLAUDE_CLI_PERMISSION_MODE`` defaults to "auto": Claude Code's own smart
@@ -8,7 +8,7 @@ auto-approval heuristic (the same mode this project's own development sessions r
 under), combined unconditionally with ``--permission-prompts none`` in process.py so
 that anything the heuristic would otherwise stop to ask about is denied instead of
 hanging forever with no human to answer. This resolves the security default that was
-left open in ../../docs/08-security.md; override via ``CLAUDE_CLI_PERMISSION_MODE``
+left open in ../../docs/06-security.md; override via ``CLAUDE_CLI_PERMISSION_MODE``
 if a different mode is needed.
 
 ``CLAUDE_CLI_RESTRICTED`` defaults to true: this plugin's job is "answer a chat
@@ -21,7 +21,7 @@ full agent with system access.
 
 ``CLAUDE_CLI_SESSION_CONTINUITY`` defaults to true: resume a prior `claude` session
 via `--resume` instead of re-flattening the whole conversation on every turn, when
-client.py's tracking shows it's safe to (see session.py and docs/10-roadmap.md, Fase
+client.py's tracking shows it's safe to (see session.py and docs/08-roadmap.md, Fase
 4). Every failure mode falls back to a normal, full-history call automatically —
 verified empirically, including the case of a `--resume` target the CLI no longer
 recognises. Kept configurable in case a deployment wants to rule the behavior out

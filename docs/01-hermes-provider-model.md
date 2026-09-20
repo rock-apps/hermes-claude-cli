@@ -54,7 +54,7 @@ register_provider(copilot_acp)
 - Declares `HERMES_SKIP_TRANSPORT_WRAP = True` and `HERMES_SKIP_ASYNC_WRAP = True` — telling the core this client is already "complete" and shouldn't be re-wrapped by the generic HTTP transport layer.
 - Implements timeouts, a compatibility probe (`_acp_supported`) to fail fast if the binary doesn't support the protocol, file-permission handling (`_ensure_path_within_cwd`, denies paths outside the session `cwd`), and content redaction (`redact_sensitive_text`) before returning file content read during the ACP session.
 
-This is the reference pattern this plugin follows — not because the `claude` CLI speaks the same ACP protocol (it doesn't, see [06](./06-claude-cli-reference.md)), but because the *class of solution* (`create_client()` + `auth_type="external_process"` + a client class that talks to a subprocess over stdio) is exactly the gap an HTTP bridge would otherwise fill, more heavily and less safely.
+This is the reference pattern this plugin follows — not because the `claude` CLI speaks the same ACP protocol (it doesn't, see [04](./04-claude-cli-reference.md)), but because the *class of solution* (`create_client()` + `auth_type="external_process"` + a client class that talks to a subprocess over stdio) is exactly the gap an HTTP bridge would otherwise fill, more heavily and less safely.
 
 ## Alternative distribution: `pip` entry point
 
@@ -65,7 +65,7 @@ This is the reference pattern this plugin follows — not because the `claude` C
 claude-cli = "hermes_claude_cli:register"
 ```
 
-With one caveat: it's opt-in — only entry points whose name is in Hermes' `plugins.enabled` config get loaded. This plugin uses the directory/symlink path instead (no added friction), matching how it's installed today; the entry point remains a possible future distribution option, tracked as low priority in [10-roadmap.md](./10-roadmap.md).
+With one caveat: it's opt-in — only entry points whose name is in Hermes' `plugins.enabled` config get loaded. This plugin uses the directory/symlink path instead (no added friction), matching how it's installed today; the entry point remains a possible future distribution option, tracked as low priority in [08-roadmap.md](./08-roadmap.md).
 
 ## What this means for the wire protocol
 

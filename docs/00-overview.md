@@ -8,17 +8,17 @@ Goal: use a Claude Max subscription (via the authenticated `claude` CLI) as a fi
 
 ## The architecture decision
 
-Talking to a CLI tool from Hermes needs some translation layer between an OpenAI-compatible request and a `claude` CLI invocation. The question was whether that layer needs to be a separate HTTP server (a Go binary, its own repository, a systemd service, a listening port) — full reasoning in [ADR 04](./04-is-bridge-necessary.md).
+Talking to a CLI tool from Hermes needs some translation layer between an OpenAI-compatible request and a `claude` CLI invocation. The question was whether that layer needs to be a separate HTTP server (its own repository, a systemd service, a listening port) — full reasoning in [ADR 02](./02-is-bridge-necessary.md).
 
 It doesn't: Hermes Agent ships an extension point built for exactly this case — `ProviderProfile.create_client()` + `auth_type="external_process"`, the same mechanism its bundled `copilot-acp` provider uses. That lets the whole translation layer live inside this Python plugin as a local subprocess over stdio — no HTTP server, port, or systemd unit anywhere.
 
-That's what got built, tested, and validated end-to-end against a real Hermes Agent installation — see [10-roadmap.md](./10-roadmap.md) for the full record.
+That's what got built, tested, and validated end-to-end against a real Hermes Agent installation — see [08-roadmap.md](./08-roadmap.md) for the full record.
 
 ## Facts this project depends on
 
 1. **"Hermes" is [Hermes Agent](https://github.com/NousResearch/hermes-agent) (Nous Research)** — confirmed, not assumed: the plugin is built against its real `providers` API and has been run successfully inside a live Hermes Agent process, including the maintainer's own personal installation.
 2. The target environment has the **Claude Code CLI (`claude`)** installed and authenticated with a Max subscription.
-3. The repository's software license is the one thing still undecided; everything else (package name, install method, permission defaults) was resolved during implementation — see [10-roadmap.md](./10-roadmap.md).
+3. The repository's software license is the one thing still undecided; everything else (package name, install method, permission defaults) was resolved during implementation — see [08-roadmap.md](./08-roadmap.md).
 
 ## How this was researched
 
