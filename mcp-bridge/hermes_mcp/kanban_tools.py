@@ -67,3 +67,50 @@ def kanban_block(task_id: str, reason: str) -> str:
     """Mark a task blocked with a reason, so a human (or a dependency) can
     unblock it later."""
     return run_hermes("kanban", "block", task_id, reason).output
+
+
+def kanban_unblock(task_id: str, reason: str = "") -> str:
+    """Return a blocked (or scheduled) task to ready — the counterpart to
+    kanban_block. Optionally records `reason` as a comment before unblocking."""
+    args = ["kanban", "unblock", task_id]
+    if reason:
+        args += ["--reason", reason]
+    return run_hermes(*args).output
+
+
+def kanban_archive(task_id: str) -> str:
+    """Archive a task (hides it from normal listings without deleting it) —
+    use for duplicates or tasks no longer relevant. This does not permanently
+    delete anything; that requires `hermes kanban archive --rm`, deliberately
+    not exposed here."""
+    return run_hermes("kanban", "archive", task_id).output
+
+
+def kanban_stats(as_json: bool = False) -> str:
+    """Per-status and per-assignee task counts, plus the oldest-ready task's
+    age — a quick board health overview."""
+    args = ["kanban", "stats"]
+    if as_json:
+        args.append("--json")
+    return run_hermes(*args).output
+
+
+def kanban_runs(
+    task_id: str, as_json: bool = False, state_type: str = "", state_name: str = ""
+) -> str:
+    """Show a task's attempt history — one row per run (profile, outcome,
+    elapsed time, summary). Use this to see what actually happened on past
+    attempts of a task, including ones that failed silently."""
+    args = ["kanban", "runs", task_id]
+    if as_json:
+        args.append("--json")
+    if state_type and state_name:
+        args += ["--state-type", state_type, "--state-name", state_name]
+    return run_hermes(*args).output
+
+
+def kanban_context(task_id: str) -> str:
+    """Print the full context a worker sees for a task: title, body, parent
+    task results, and comments — use to understand a task the way whoever
+    (or whatever) executes it will."""
+    return run_hermes("kanban", "context", task_id).output

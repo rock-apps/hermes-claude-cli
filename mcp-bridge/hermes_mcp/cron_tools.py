@@ -130,3 +130,45 @@ def cron_status() -> str:
     """Check whether Hermes' own cron scheduler (not the built-in session
     scheduler) is running."""
     return run_hermes("cron", "status").output
+
+
+def cron_run(job_id: str) -> str:
+    """Trigger a job immediately, outside its normal schedule — use this to
+    test a job (or a change made with cron_edit) without waiting for its next
+    scheduled time. Does not change the schedule itself."""
+    return run_hermes("cron", "run", job_id).output
+
+
+def cron_runs(job_id: str = "", limit: int | None = None) -> str:
+    """Show past execution attempts (one row per run: outcome, timestamp,
+    dispatch status) — the only way to inspect what a job actually did on a
+    past run, since no `hermes cron` command exposes a job's prompt text or
+    internal logic. Pass `job_id` to filter to one job; omit it to see recent
+    runs across all jobs."""
+    args = ["cron", "runs"]
+    if job_id:
+        args.append(job_id)
+    if limit is not None:
+        args += ["--limit", str(limit)]
+    return run_hermes(*args).output
+
+
+def cron_doctor() -> str:
+    """Check all scheduled jobs for common health issues (stuck jobs, missed
+    runs, misconfiguration) in one pass."""
+    return run_hermes("cron", "doctor").output
+
+
+def cron_incidents(action: str = "list", incident_id: str = "", state: str = "") -> str:
+    """List or acknowledge durable cron failure incidents. `action="list"`
+    (default) shows incidents, optionally filtered by `state`
+    (detected/alerted/resolved/closed). `action="ack"` requires `incident_id`
+    and marks that incident acknowledged."""
+    args = ["cron", "incidents", action]
+    if action == "ack":
+        if incident_id:
+            args.append(incident_id)
+        return run_hermes(*args).output
+    if state:
+        args += ["--state", state]
+    return run_hermes(*args).output

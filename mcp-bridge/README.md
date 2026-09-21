@@ -30,7 +30,7 @@ Configure the **Hermes profile's own `.env`**:
 ```bash
 # .env (e.g. ~/.hermes/profiles/rockapps/.env)
 CLAUDE_CLI_MCP_CONFIG={"mcpServers":{"hermes-bridge-rockapps":{"command":"/absolute/path/to/mcp-bridge/.venv/bin/hermes-mcp-bridge","env":{"HERMES_MCP_PROFILE":"rockapps"}}}}
-CLAUDE_CLI_ALLOWED_TOOLS=mcp__hermes-bridge-rockapps__cron_list,mcp__hermes-bridge-rockapps__cron_create,mcp__hermes-bridge-rockapps__cron_edit,mcp__hermes-bridge-rockapps__cron_pause,mcp__hermes-bridge-rockapps__cron_resume,mcp__hermes-bridge-rockapps__cron_remove,mcp__hermes-bridge-rockapps__cron_status,mcp__hermes-bridge-rockapps__kanban_list,mcp__hermes-bridge-rockapps__kanban_show,mcp__hermes-bridge-rockapps__kanban_create,mcp__hermes-bridge-rockapps__kanban_assign,mcp__hermes-bridge-rockapps__kanban_comment,mcp__hermes-bridge-rockapps__kanban_complete,mcp__hermes-bridge-rockapps__kanban_block
+CLAUDE_CLI_ALLOWED_TOOLS=mcp__hermes-bridge-rockapps__cron_list,mcp__hermes-bridge-rockapps__cron_create,mcp__hermes-bridge-rockapps__cron_edit,mcp__hermes-bridge-rockapps__cron_pause,mcp__hermes-bridge-rockapps__cron_resume,mcp__hermes-bridge-rockapps__cron_remove,mcp__hermes-bridge-rockapps__cron_status,mcp__hermes-bridge-rockapps__cron_run,mcp__hermes-bridge-rockapps__cron_runs,mcp__hermes-bridge-rockapps__cron_doctor,mcp__hermes-bridge-rockapps__cron_incidents,mcp__hermes-bridge-rockapps__kanban_list,mcp__hermes-bridge-rockapps__kanban_show,mcp__hermes-bridge-rockapps__kanban_create,mcp__hermes-bridge-rockapps__kanban_assign,mcp__hermes-bridge-rockapps__kanban_comment,mcp__hermes-bridge-rockapps__kanban_complete,mcp__hermes-bridge-rockapps__kanban_block,mcp__hermes-bridge-rockapps__kanban_unblock,mcp__hermes-bridge-rockapps__kanban_archive,mcp__hermes-bridge-rockapps__kanban_stats,mcp__hermes-bridge-rockapps__kanban_runs,mcp__hermes-bridge-rockapps__kanban_context
 ```
 
 `CLAUDE_CLI_MCP_CONFIG` is passed straight through to `--mcp-config` (this plugin does no parsing of it). `CLAUDE_CLI_ALLOWED_TOOLS` is a comma-separated list this plugin turns into `--settings '{"permissions":{"allow":[...]}}'` itself — see [`../docs/05-configuration.md`](../docs/05-configuration.md).
@@ -43,7 +43,7 @@ Restart the gateway (`hermes gateway restart`) after editing `.env` — and rest
 
 **Also running `hermes-webui`? Restart it too — separately.** It's its own long-lived process (`~/hermes-webui/server.py`, `ctl.sh`), not part of `hermes-gateway.service`, and it loads this plugin/`.env` once at its own startup. Confirmed on a real deployment: a web UI session kept using stale config (no bridge tools, no streaming) for two days across multiple gateway restarts, until `cd ~/hermes-webui && ./ctl.sh restart` was run. See [`../docs/05-configuration.md`](../docs/05-configuration.md#hermes-webui-is-a-third-separate-process--it-needs-its-own-restart-too) for the full writeup.
 
-**Security implication, explicit on purpose**: `CLAUDE_CLI_ALLOWED_TOOLS` pre-approves *write* actions too (`cron_create`, `cron_remove`, `kanban_complete`, ...) — the model can create/delete scheduled jobs and complete/block kanban tasks from a chat message with no human approval step. That's the whole point of building this bridge, but it's worth being deliberate about which tool names go in that list rather than pasting the full set above without reading it. For read-only access, only include `cron_list`/`cron_status`/`kanban_list`/`kanban_show`.
+**Security implication, explicit on purpose**: `CLAUDE_CLI_ALLOWED_TOOLS` pre-approves *write* actions too (`cron_create`, `cron_edit`, `cron_run`, `cron_remove`, `kanban_complete`, `kanban_unblock`, `kanban_archive`, ...) — the model can create/edit/delete scheduled jobs, trigger one immediately, and complete/block/unblock/archive kanban tasks from a chat message with no human approval step. That's the whole point of building this bridge, but it's worth being deliberate about which tool names go in that list rather than pasting the full set above without reading it. For read-only access, only include `cron_list`/`cron_status`/`cron_runs`/`cron_doctor`/`cron_incidents`/`kanban_list`/`kanban_show`/`kanban_stats`/`kanban_runs`/`kanban_context`.
 
 ### Onboarding multiple (or new) profiles: `scripts/sync_bridges.py`
 
@@ -84,6 +84,10 @@ Environment variables the bridge itself reads (distinct from the `CLAUDE_CLI_*` 
 | `cron_edit` | `hermes cron edit <job_id> [--schedule] [--prompt] [--name] [--deliver] [--repeat] [--continuity] [--model] [--provider] [--reasoning-effort]` — edits in place, only the fields passed change. Prefer this over `cron_remove` + `cron_create` for changing a live job: recreating drops its `job_id` and execution history. |
 | `cron_pause` / `cron_resume` / `cron_remove` | `hermes cron pause/resume/remove <job_id>` |
 | `cron_status` | `hermes cron status` |
+| `cron_run` | `hermes cron run <job_id>` — trigger a job immediately, outside its schedule (e.g. to test a `cron_edit` change without waiting). |
+| `cron_runs` | `hermes cron runs [job_id] [--limit]` — past execution attempts (outcome, timestamp, dispatch status). |
+| `cron_doctor` | `hermes cron doctor` — health check across all jobs. |
+| `cron_incidents` | `hermes cron incidents [list\|ack] [incident_id] [--state]` — list or acknowledge durable scheduler failure incidents. |
 | `kanban_list` | `hermes kanban list [--assignee] [--status] [--mine]` |
 | `kanban_show` | `hermes kanban show <task_id>` |
 | `kanban_create` | `hermes kanban create <title> [--assignee] [--body]` |
@@ -91,13 +95,20 @@ Environment variables the bridge itself reads (distinct from the `CLAUDE_CLI_*` 
 | `kanban_comment` | `hermes kanban comment <task_id> <text>` |
 | `kanban_complete` | `hermes kanban complete <task_id> [--summary]` |
 | `kanban_block` | `hermes kanban block <task_id> <reason>` |
+| `kanban_unblock` | `hermes kanban unblock <task_id> [--reason]` — the counterpart to `kanban_block`. |
+| `kanban_archive` | `hermes kanban archive <task_id>` — hides a task from normal listings without deleting it (e.g. duplicates). `--rm` permanent-delete mode is deliberately not exposed. |
+| `kanban_stats` | `hermes kanban stats [--json]` — per-status/per-assignee counts, oldest-ready age. |
+| `kanban_runs` | `hermes kanban runs <task_id> [--json] [--state-type] [--state-name]` — a task's attempt history. |
+| `kanban_context` | `hermes kanban context <task_id>` — full context (title, body, parent results, comments) a worker would see for this task. |
+
+Deliberately not wrapped: the rest of `hermes kanban`'s ~45 subcommands (`swarm`, `dispatch`, `daemon`, `claim`, `heartbeat`, `watch`, `tail`, `notify-*`, `gc`, `repair`, `link`/`unlink`, `specify`, `decompose`, `boards`, ...) are internal worker/dispatcher/board-admin machinery, not something a conversational assistant needs — same reasoning as `delegate_task` being out of scope above. Re-evaluate only if a concrete need shows up, the same way `cron_edit`/`kanban_unblock`/`kanban_archive` did (see `docs/07-scope-and-migration.md`).
 
 **Known gap in the underlying `hermes` CLI, not fixable from this bridge**: there is no command anywhere in `hermes cron` that prints an existing job's current prompt text. `cron_list`/`cron_status`/`cron_runs`/`cron_doctor` all expose schedule/name/status/execution history, never the prompt — confirmed by reading every `hermes cron <subcommand> --help` (2026-09-20). Practical consequence: before calling `cron_edit(prompt=...)` or recreating a job, get the current wording from the user, a durable memory note, or an earlier conversation — there is no CLI call that will hand it back to you.
 
 ## Development
 
 ```bash
-.venv/bin/python -m pytest -q     # 41 tests, no real subprocess calls (subprocess.run is mocked)
+.venv/bin/python -m pytest -q     # 58 tests, no real subprocess calls (subprocess.run is mocked)
 .venv/bin/ruff check .
 ```
 

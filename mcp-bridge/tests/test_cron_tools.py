@@ -171,6 +171,87 @@ class TestCronLifecycle:
         fake.assert_called_once_with("cron", "status")
         assert "running" in result
 
+    def test_run_targets_the_job_id(self, monkeypatch):
+        fake = MagicMock(return_value=_ok())
+        monkeypatch.setattr(cron_tools, "run_hermes", fake)
+
+        cron_tools.cron_run(job_id="t_abc")
+
+        fake.assert_called_once_with("cron", "run", "t_abc")
+
+
+class TestCronRuns:
+    def test_no_arguments_lists_every_job(self, monkeypatch):
+        fake = MagicMock(return_value=_ok("run-1 completed\n"))
+        monkeypatch.setattr(cron_tools, "run_hermes", fake)
+
+        result = cron_tools.cron_runs()
+
+        fake.assert_called_once_with("cron", "runs")
+        assert "run-1" in result
+
+    def test_job_id_filters_to_one_job(self, monkeypatch):
+        fake = MagicMock(return_value=_ok())
+        monkeypatch.setattr(cron_tools, "run_hermes", fake)
+
+        cron_tools.cron_runs(job_id="t_abc")
+
+        fake.assert_called_once_with("cron", "runs", "t_abc")
+
+    def test_limit_is_forwarded_as_a_string(self, monkeypatch):
+        fake = MagicMock(return_value=_ok())
+        monkeypatch.setattr(cron_tools, "run_hermes", fake)
+
+        cron_tools.cron_runs(limit=10)
+
+        fake.assert_called_once_with("cron", "runs", "--limit", "10")
+
+    def test_job_id_and_limit_together(self, monkeypatch):
+        fake = MagicMock(return_value=_ok())
+        monkeypatch.setattr(cron_tools, "run_hermes", fake)
+
+        cron_tools.cron_runs(job_id="t_abc", limit=5)
+
+        fake.assert_called_once_with("cron", "runs", "t_abc", "--limit", "5")
+
+
+class TestCronDoctor:
+    def test_takes_no_arguments(self, monkeypatch):
+        fake = MagicMock(return_value=_ok("all jobs healthy\n"))
+        monkeypatch.setattr(cron_tools, "run_hermes", fake)
+
+        result = cron_tools.cron_doctor()
+
+        fake.assert_called_once_with("cron", "doctor")
+        assert "healthy" in result
+
+
+class TestCronIncidents:
+    def test_defaults_to_listing(self, monkeypatch):
+        fake = MagicMock(return_value=_ok("incident-1 detected\n"))
+        monkeypatch.setattr(cron_tools, "run_hermes", fake)
+
+        result = cron_tools.cron_incidents()
+
+        fake.assert_called_once_with("cron", "incidents", "list")
+        assert "incident-1" in result
+
+    def test_state_filter_is_forwarded(self, monkeypatch):
+        fake = MagicMock(return_value=_ok())
+        monkeypatch.setattr(cron_tools, "run_hermes", fake)
+
+        cron_tools.cron_incidents(state="detected")
+
+        fake.assert_called_once_with("cron", "incidents", "list", "--state", "detected")
+
+    def test_ack_action_targets_an_incident_id(self, monkeypatch):
+        fake = MagicMock(return_value=_ok())
+        monkeypatch.setattr(cron_tools, "run_hermes", fake)
+
+        cron_tools.cron_incidents(action="ack", incident_id="inc_1")
+
+        fake.assert_called_once_with("cron", "incidents", "ack", "inc_1")
+
 
 class TestErrorSurfacing:
     def test_a_failing_call_still_returns_text_instead_of_raising(self, monkeypatch):

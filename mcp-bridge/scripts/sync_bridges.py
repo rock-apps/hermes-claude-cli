@@ -44,6 +44,10 @@ _TOOLS = (
     cron_tools.cron_resume,
     cron_tools.cron_remove,
     cron_tools.cron_status,
+    cron_tools.cron_run,
+    cron_tools.cron_runs,
+    cron_tools.cron_doctor,
+    cron_tools.cron_incidents,
     kanban_tools.kanban_list,
     kanban_tools.kanban_show,
     kanban_tools.kanban_create,
@@ -51,6 +55,11 @@ _TOOLS = (
     kanban_tools.kanban_comment,
     kanban_tools.kanban_complete,
     kanban_tools.kanban_block,
+    kanban_tools.kanban_unblock,
+    kanban_tools.kanban_archive,
+    kanban_tools.kanban_stats,
+    kanban_tools.kanban_runs,
+    kanban_tools.kanban_context,
 )
 TOOL_NAMES = tuple(fn.__name__ for fn in _TOOLS)
 

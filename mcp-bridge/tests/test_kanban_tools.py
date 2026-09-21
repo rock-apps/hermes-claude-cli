@@ -123,6 +123,81 @@ class TestKanbanWorkflowActions:
 
         fake.assert_called_once_with("kanban", "block", "t_abc", "waiting on API credentials")
 
+    def test_unblock_without_reason(self, monkeypatch):
+        fake = MagicMock(return_value=_ok())
+        monkeypatch.setattr(kanban_tools, "run_hermes", fake)
+
+        kanban_tools.kanban_unblock(task_id="t_abc")
+
+        fake.assert_called_once_with("kanban", "unblock", "t_abc")
+
+    def test_unblock_with_reason(self, monkeypatch):
+        fake = MagicMock(return_value=_ok())
+        monkeypatch.setattr(kanban_tools, "run_hermes", fake)
+
+        kanban_tools.kanban_unblock(task_id="t_abc", reason="credentials received")
+
+        fake.assert_called_once_with("kanban", "unblock", "t_abc", "--reason", "credentials received")
+
+    def test_archive_targets_the_task_id(self, monkeypatch):
+        fake = MagicMock(return_value=_ok())
+        monkeypatch.setattr(kanban_tools, "run_hermes", fake)
+
+        kanban_tools.kanban_archive(task_id="t_abc")
+
+        fake.assert_called_once_with("kanban", "archive", "t_abc")
+
+
+class TestKanbanStats:
+    def test_takes_no_arguments_by_default(self, monkeypatch):
+        fake = MagicMock(return_value=_ok("ready: 3\ndone: 12\n"))
+        monkeypatch.setattr(kanban_tools, "run_hermes", fake)
+
+        result = kanban_tools.kanban_stats()
+
+        fake.assert_called_once_with("kanban", "stats")
+        assert "ready: 3" in result
+
+    def test_as_json_adds_the_json_flag(self, monkeypatch):
+        fake = MagicMock(return_value=_ok())
+        monkeypatch.setattr(kanban_tools, "run_hermes", fake)
+
+        kanban_tools.kanban_stats(as_json=True)
+
+        fake.assert_called_once_with("kanban", "stats", "--json")
+
+
+class TestKanbanRuns:
+    def test_targets_the_task_id_only_by_default(self, monkeypatch):
+        fake = MagicMock(return_value=_ok("run-1 completed\n"))
+        monkeypatch.setattr(kanban_tools, "run_hermes", fake)
+
+        result = kanban_tools.kanban_runs(task_id="t_abc")
+
+        fake.assert_called_once_with("kanban", "runs", "t_abc")
+        assert "run-1" in result
+
+    def test_state_filter_requires_both_type_and_name(self, monkeypatch):
+        fake = MagicMock(return_value=_ok())
+        monkeypatch.setattr(kanban_tools, "run_hermes", fake)
+
+        kanban_tools.kanban_runs(task_id="t_abc", state_type="outcome", state_name="failed")
+
+        fake.assert_called_once_with(
+            "kanban", "runs", "t_abc", "--state-type", "outcome", "--state-name", "failed"
+        )
+
+
+class TestKanbanContext:
+    def test_targets_the_task_id(self, monkeypatch):
+        fake = MagicMock(return_value=_ok("full context text\n"))
+        monkeypatch.setattr(kanban_tools, "run_hermes", fake)
+
+        result = kanban_tools.kanban_context(task_id="t_abc")
+
+        fake.assert_called_once_with("kanban", "context", "t_abc")
+        assert "full context" in result
+
 
 class TestErrorSurfacing:
     def test_a_failing_call_still_returns_text_instead_of_raising(self, monkeypatch):
